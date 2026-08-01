@@ -9,8 +9,9 @@ import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from gauntlet.feasibility import FeasibilityReport, assess
 from gauntlet.mandates import DEMO_MANDATES, get_mandate
-from gauntlet.models import Mandate, RebalanceFrequency, RunReport
+from gauntlet.models import Constraints, Mandate, RebalanceFrequency, RunReport
 from gauntlet.pipeline import run_pipeline
 from gauntlet.universe import Universe, load_universe
 
@@ -44,6 +45,23 @@ def get_universe() -> Universe:
 @app.get("/api/mandates")
 def list_mandates() -> list[Mandate]:
     return [get_mandate(key) for key in DEMO_MANDATES]
+
+
+@app.post("/api/constraints/feasibility", response_model=FeasibilityReport)
+def check_constraint_feasibility(constraints: Constraints) -> FeasibilityReport:
+    """Whether a constraint set is satisfiable, and the legal range of each field.
+
+    Backs the Phase 5 mandate builder: a client adjusts a control, the widget
+    re-posts the *whole* constraint set, and locks the ranges that come back.
+    Posting the whole set rather than one field is not incidental — the fields
+    are interdependent, so a per-field check would report stale bounds. Cheap
+    enough to call on every keystroke: pure arithmetic, no model, no backtest.
+
+    `max_drawdown_tolerance` and `max_volatility` come back with null bounds.
+    They are measured after execution, so deciding reachability means backtesting
+    a candidate portfolio rather than evaluating an inequality — Phase 5.
+    """
+    return assess(constraints)
 
 
 @app.post("/api/runs", response_model=RunReport)
