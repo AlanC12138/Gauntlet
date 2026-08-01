@@ -22,7 +22,15 @@ Two guarantees are enforced in code rather than requested in a prompt:
 - **Screening findings must be grounded.** Every finding has to quote a retrieved document verbatim; excerpts that appear in no retrieved note are dropped before the supervisor sees them. This has caught a live hallucination.
 - **Compliance is binding, screening is advisory.** If the deterministic rules engine reports a violation the verdict is `revise` regardless of what the Synthesis Agent decided — an LLM that can talk past an arithmetic breach makes the rules engine decorative. Screening findings are LLM judgment and *can* be weighed, with justification.
 
-Phase 3 (the two-part eval harness) is next.
+**Phase 3 (eval harness) built.** Two suites, measuring genuinely different kinds of correctness. Run with `poetry run gauntlet eval` — no LLM calls, no tokens.
+
+**Backtest math — 12/12 cases exact, worst deviation 2.8e-11.** Every metric is checked two ways: against hand-derived answers (constant growth compounds exactly; a 120→90 decline is exactly −25%), and against an independent reference implementation that simulates *shares* rather than return algebra — the way a broker statement is produced. Two implementations that share an approach agreeing proves little; two that don't is evidence. Cases run over both synthetic fixtures and 3,270 rows of real cached prices.
+
+**Compliance conformance — 26/26 cases labeled exactly, 0 false positives, 0 false negatives across all 9 rules.** Labels are derived by hand from each mandate's meaning, never read off the engine, so the suite is an independent statement of the specification rather than a tautology. Read the number correctly: the engine is deterministic, so **100% is the pass mark, not an achievement** — anything lower is a defect. The cases that earn their keep are the boundaries (sitting exactly on a limit must *not* fire) and the tricky negatives (60% in broad-market funds against a 25% sector cap; gold against an equity floor), because an engine that flags everything scores perfect recall and only those catch it.
+
+The harness paid for itself on its first run by finding a real bug: **Sharpe ratio exploded to ~1e15 on constant-return paths**, because the zero-variance guard tested `std > 0` and floating point returns ~1e-16 rather than 0. A portfolio held entirely in a stable short-duration bond fund would have reported an astronomical Sharpe in its memo.
+
+Phase 4 (persistence + auth) is next.
 
 ## Running it
 
@@ -47,6 +55,12 @@ Backtest explicit weights without calling the LLM — useful for exercising the 
 
 ```bash
 poetry run gauntlet backtest '{"SPY": 0.6, "AGG": 0.4}'
+```
+
+Run the eval harness (no LLM calls, no tokens spent):
+
+```bash
+poetry run gauntlet eval
 ```
 
 Or serve the API (`POST /api/runs`, `GET /api/universe`, `GET /api/mandates`):

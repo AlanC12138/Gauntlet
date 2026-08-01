@@ -75,6 +75,33 @@ def run(
         typer.echo(f"\nFull report written to {json_out}")
 
 
+@app.command("eval")
+def run_evals(
+    suite: Annotated[
+        str | None, typer.Option("--suite", help="backtest | compliance (default: both)")
+    ] = None,
+    json_out: Annotated[Path | None, typer.Option("--json")] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+) -> None:
+    """Run the eval harness. No LLM calls, no tokens spent."""
+    _configure_logging(verbose)
+    from gauntlet.evals.runner import SUITES, render, run_all
+
+    if suite is not None and suite not in SUITES:
+        raise typer.BadParameter(f"unknown suite {suite!r}; available: {', '.join(SUITES)}")
+
+    report = run_all([suite] if suite else None)
+    typer.echo(render(report))
+
+    if json_out:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+        typer.echo(f"\nWritten to {json_out}")
+
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
 @app.command("backtest")
 def backtest_weights(
     weights_json: Annotated[

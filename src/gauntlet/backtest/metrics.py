@@ -35,6 +35,20 @@ from gauntlet.models import PerformanceMetrics
 TRADING_DAYS_PER_YEAR = 252
 DAYS_PER_YEAR = 365.25
 
+# Below this, a standard deviation is numerically zero and the ratio it would
+# divide is undefined. An exact `> 0` guard is not enough: a constant-return path
+# gives a std of ~1e-16 rather than 0, which passes the guard and produces a
+# Sharpe around 1e15. Found by the eval harness, not by inspection.
+#
+# Daily return standard deviations are of order 1e-3; 1e-12 is twelve orders
+# below anything real, so nothing meaningful is suppressed.
+#
+# Reporting 0.0 for these is a *convention* for a degenerate case, not a
+# measurement — a positive return at genuinely zero risk has an unbounded ratio,
+# not a zero one. No such portfolio exists, but the number should be read as
+# "undefined" rather than "bad".
+NEAR_ZERO_STDEV = 1e-12
+
 
 def drawdown_series(equity: pd.Series) -> pd.Series:
     """Fractional drawdown from the running peak. Zero at each new high, else negative."""
@@ -62,7 +76,7 @@ def compute_metrics(equity: pd.Series, risk_free_rate: float = 0.0) -> Performan
     excess_std = float(excess.std(ddof=1))
     sharpe = (
         float(excess.mean() / excess_std * np.sqrt(TRADING_DAYS_PER_YEAR))
-        if excess_std > 0
+        if excess_std > NEAR_ZERO_STDEV
         else 0.0
     )
 
@@ -70,7 +84,7 @@ def compute_metrics(equity: pd.Series, risk_free_rate: float = 0.0) -> Performan
     downside_dev = float(np.sqrt((downside**2).mean()) * np.sqrt(TRADING_DAYS_PER_YEAR))
     sortino = (
         float(excess.mean() * TRADING_DAYS_PER_YEAR / downside_dev)
-        if downside_dev > 0
+        if downside_dev > NEAR_ZERO_STDEV
         else 0.0
     )
 
