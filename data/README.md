@@ -2,11 +2,11 @@
 
 `universe.json` is the fixed investable universe for Gauntlet. It is the single source of truth for **which instruments exist** and **what sector each belongs to** — the latter being a hard dependency for the Constraint-Compliance Agent's sector-cap rules (Phase 2).
 
-Verified against yfinance on 2026-07-31: all 47 constituents return 3,270 trading days over the declared window with no gaps.
+Verified against yfinance: all 52 constituents return 3,270 trading days over the declared window with no gaps.
 
 ## Composition
 
-47 instruments: 39 US large-cap equities + 8 ETFs.
+52 instruments: 39 US large-cap equities + 13 ETFs.
 
 | Sector (GICS) | Equities | Sector ETF |
 |---|---|---|
@@ -22,7 +22,20 @@ Verified against yfinance on 2026-07-31: all 47 constituents return 3,270 tradin
 | Materials | APD, SHW, NEM | — |
 | Real Estate | AMT, PLD, SPG | — |
 
-Plus 3 diversified equity ETFs (SPY, QQQ, IWM) and 3 non-equity (AGG, TLT, GLD).
+Plus 3 diversified equity ETFs (SPY, QQQ, IWM), 7 fixed-income ETFs spanning
+duration and credit (SHY, IEF, TLT for Treasuries across the curve; AGG for the
+aggregate index; TIP for inflation-linked; LQD and HYG for investment-grade and
+high-yield credit), and 1 commodity (GLD).
+
+**Why seven bond funds.** The universe originally carried two, which is enough
+for an equity-tilted mandate and structurally too few for a conservative one: a
+30% fixed-income floor under an 8% single-position cap needs at least four
+instruments to be reachable at all, and two caps it at 16%. That made the
+conservative demo mandate arithmetically impossible — a defect found only after a
+live run spent three iterations failing to satisfy it. A universe intended to
+support balanced and conservative mandates needs a real fixed-income menu, not a
+token one. `tests/test_asset_class_bands.py` now asserts this feasibility
+directly.
 
 ## Schema
 
@@ -40,7 +53,12 @@ Each constituent has five fields:
 
 - **`constituent`** — weight counts in full toward `sector`'s cap. All 39 equities plus XLK/XLE.
 - **`diversified`** — broad multi-sector equity, no single-sector attribution. Exempt from sector caps, counts toward total equity exposure. SPY, QQQ, IWM.
-- **`non_equity`** — exempt from sector caps *and* from total equity exposure. AGG, TLT, GLD.
+- **`non_equity`** — exempt from sector caps *and* from total equity exposure. The 7 bond ETFs plus GLD.
+
+Note that `sector_cap_treatment` and the asset-class bucket answer different
+questions. SPY is `diversified` (exempt from sector caps) but is unambiguously
+*equity* exposure; conflating the two would let a mandate's bond floor be
+satisfied with an index fund. The bucket mapping lives in `gauntlet/universe.py`.
 
 ## Decisions
 

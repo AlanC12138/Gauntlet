@@ -15,7 +15,7 @@ See [MVP.md](MVP.md) for scope/phases and [TECH_STACK.md](TECH_STACK.md) for sta
 
 ## Status
 
-**Phases 1–2 built.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 47 instruments across all 11 GICS sectors, 2013–2025, see [data/README.md](data/README.md).
+**Phases 1–2 built.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 52 instruments across all 11 GICS sectors plus a fixed-income and commodity sleeve, 2013–2025, see [data/README.md](data/README.md).
 
 Two guarantees are enforced in code rather than requested in a prompt:
 
@@ -31,7 +31,7 @@ poetry install
 cp .env.example .env   # add your ANTHROPIC_API_KEY
 ```
 
-Warm the price cache once — 47 tickers × 3,270 trading days, fetched from yfinance and stored append-only:
+Warm the price cache once — 52 tickers × 3,270 trading days, fetched from yfinance and stored append-only:
 
 ```bash
 poetry run gauntlet fetch

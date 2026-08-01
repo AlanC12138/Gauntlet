@@ -121,3 +121,44 @@ def test_demo_mandates_carry_plausible_tolerances():
     assert tol["conservative"] < tol["balanced"] < tol["aggressive"]
     assert 0.05 <= tol["conservative"] <= 0.20, "implausible for capital preservation"
     assert 0.30 <= tol["aggressive"] <= 0.60, "implausible for an aggressive mandate"
+
+
+def test_post_execution_violations_carry_a_revision_diagnostic():
+    """A bare "you exceeded the limit" leaves the agent revising blind — observed
+    live as improvement then regression. Both post-execution rules get the same
+    orientation: when the damage happened, and what the risk posture was."""
+    backtest = run_backtest(_alloc().weights, CRASH_PRICES, rebalance="none")
+    mandate = get_mandate("balanced").model_copy(
+        update={
+            "constraints": Constraints(
+                min_holdings=1,
+                max_position_weight=1.0,
+                max_drawdown_tolerance=0.05,
+                max_volatility=0.01,
+            )
+        }
+    )
+    report = check_compliance(_alloc(), mandate, backtest=backtest)
+    breached = {v.rule for v in report.violations}
+    assert {"max_drawdown_tolerance", "max_volatility"} <= breached
+
+    for violation in report.violations:
+        if violation.rule in {"max_drawdown_tolerance", "max_volatility"}:
+            assert "Worst years:" in violation.message
+            assert "Current mix:" in violation.message
+            assert "equity 50%" in violation.message
+
+
+def test_pre_execution_violations_stay_terse():
+    """The diagnostic is paid for on every revision, so it belongs only where the
+    agent could not have known the answer in advance."""
+    over = Allocation(
+        strategy_summary="t", positions=[Position(ticker="SPY", weight=1.0, rationale="x")]
+    )
+    mandate = get_mandate("balanced").model_copy(
+        update={"constraints": Constraints(max_position_weight=0.10, min_holdings=1)}
+    )
+    violation = next(
+        v for v in check_compliance(over, mandate).violations if v.rule == "max_position_weight"
+    )
+    assert "Worst years:" not in violation.message

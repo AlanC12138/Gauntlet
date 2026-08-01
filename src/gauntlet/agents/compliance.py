@@ -51,6 +51,30 @@ def _pct(x: float) -> str:
     return f"{x * 100:.2f}%"
 
 
+def _execution_context(backtest: BacktestResult, weights: dict[str, float]) -> str:
+    """One-line diagnostic appended to every post-execution violation.
+
+    Post-execution rules are the ones a proposer cannot verify in advance, so a
+    bare "you exceeded the limit" leaves it revising blind — observed in practice
+    as improvement on the first revision followed by regression on the second.
+
+    Two facts are enough to make the next attempt directed rather than a guess:
+    *when* the damage happened, and *what the risk posture was*. Deliberately
+    minimal — this is a nudge, not a research report, and every token here is
+    paid for on each revision.
+
+    Shared across all post-execution checks by design: a volatility breach needs
+    the same orientation a drawdown breach does, and so will anything added later.
+    """
+    worst = sorted(backtest.calendar_year_returns.items(), key=lambda kv: kv[1])[:2]
+    years = ", ".join(f"{year} {ret:+.1%}" for year, ret in worst)
+    mix = ", ".join(
+        f"{bucket.replace('_', ' ')} {weight:.0%}"
+        for bucket, weight in asset_class_exposures(weights).items()
+    )
+    return f" Worst years: {years}. Current mix: {mix}."
+
+
 def check_compliance(
     allocation: Allocation,
     mandate: Mandate,
@@ -218,6 +242,7 @@ def check_compliance(
 
     if wants_post and backtest is not None:
         checks_run += POST_EXECUTION_CHECKS
+        context = _execution_context(backtest, weights)
 
         if tolerance is not None:
             # metrics.max_drawdown is negative; tolerance is a positive magnitude.
@@ -229,7 +254,7 @@ def check_compliance(
                         message=(
                             f"The allocation fell {_pct(abs(realized))} peak-to-trough over "
                             f"{backtest.start}..{backtest.end}, exceeding the mandate's "
-                            f"{_pct(tolerance)} drawdown tolerance."
+                            f"{_pct(tolerance)} drawdown tolerance." + context
                         ),
                         detail={
                             "realized_drawdown": f"{realized:.6f}",
@@ -248,7 +273,7 @@ def check_compliance(
                         message=(
                             f"Annualized volatility was {_pct(realized_vol)} over "
                             f"{backtest.start}..{backtest.end}, exceeding the mandate's "
-                            f"{_pct(vol_ceiling)} ceiling."
+                            f"{_pct(vol_ceiling)} ceiling." + context
                         ),
                         detail={
                             "realized_volatility": f"{realized_vol:.6f}",

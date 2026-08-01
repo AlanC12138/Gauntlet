@@ -4,6 +4,8 @@ Bands are pre-execution (checkable from weights); the volatility ceiling is
 post-execution, the same category as drawdown tolerance.
 """
 
+from collections import Counter
+
 import pandas as pd
 import pytest
 
@@ -11,7 +13,7 @@ from gauntlet.agents.compliance import check_compliance
 from gauntlet.backtest import run_backtest
 from gauntlet.mandates import DEMO_MANDATES, get_mandate
 from gauntlet.models import Allocation, AssetClassBand, Constraints, Position
-from gauntlet.universe import asset_class_exposures
+from gauntlet.universe import ECONOMIC_BUCKET, asset_class_exposures, load_universe
 
 PRICES = pd.DataFrame(
     {"SPY": [100.0, 112.0, 104.0, 118.0], "AGG": [100.0, 100.5, 101.0, 101.5]},
@@ -149,10 +151,43 @@ def test_conservative_mandate_now_enforces_its_stated_bond_exposure():
     assert bands["fixed_income"].min_weight >= 0.25
 
 
-def test_bands_are_internally_satisfiable():
-    """Guards against bands whose minimums sum above 1.0 — unsatisfiable by
-    construction, which would burn the whole iteration budget every run."""
+def test_band_minimums_do_not_sum_above_one():
     for key in DEMO_MANDATES:
         bands = get_mandate(key).constraints.asset_class_bands
         assert sum(b.min_weight for b in bands.values()) <= 1.0, key
         assert sum(b.max_weight for b in bands.values()) >= 1.0, key
+
+
+def test_bands_are_reachable_given_the_universe_and_position_cap():
+    """The check that matters, and the one whose absence cost a live run.
+
+    A band minimum is only satisfiable if enough instruments of that bucket
+    exist to reach it *without* breaching the single-position cap. The
+    conservative mandate once paired a 30% fixed-income floor with an 8% position
+    cap against a universe holding two bond funds — a hard ceiling of 16%. The
+    mandate was impossible, and nothing caught it until three live iterations and
+    $0.59 had been spent discovering it.
+
+    Summing band minimums (the test above) does not detect this: 30% is fine in
+    isolation. Feasibility depends on universe composition and the position cap
+    together.
+    """
+    counts = Counter(ECONOMIC_BUCKET[c.asset_class] for c in load_universe().constituents)
+
+    for key in DEMO_MANDATES:
+        constraints = get_mandate(key).constraints
+        for bucket, band in constraints.asset_class_bands.items():
+            usable = min(counts[bucket], constraints.max_holdings)
+            attainable = usable * constraints.max_position_weight
+            assert attainable >= band.min_weight, (
+                f"{key}: {bucket} floor of {band.min_weight:.0%} is unreachable — "
+                f"{counts[bucket]} instrument(s) capped at "
+                f"{constraints.max_position_weight:.0%} reach at most {attainable:.0%}"
+            )
+
+
+def test_fixed_income_menu_supports_a_conservative_mandate():
+    """A universe with only a couple of bond funds can carry equity-tilted
+    mandates and silently fail conservative ones."""
+    counts = Counter(ECONOMIC_BUCKET[c.asset_class] for c in load_universe().constituents)
+    assert counts["fixed_income"] >= 4, "too thin to build a real fixed-income sleeve"
