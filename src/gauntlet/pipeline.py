@@ -24,12 +24,16 @@ import logging
 
 import anthropic
 
-from gauntlet.agents.allocation import AllocationValidationError, propose_allocation
+from gauntlet.agents.allocation import (
+    AllocationTruncatedError,
+    AllocationValidationError,
+    propose_allocation,
+)
 from gauntlet.agents.compliance import check_compliance
 from gauntlet.agents.screening import screen_allocation
 from gauntlet.agents.synthesis import synthesize
 from gauntlet.agents.verification import verify_allocation
-from gauntlet.config import settings
+from gauntlet.config import build_client, settings
 from gauntlet.models import Iteration, Mandate, RunReport
 from gauntlet.retrieval import BM25Retriever, Retriever
 from gauntlet.universe import load_universe
@@ -45,7 +49,7 @@ def run_pipeline(
 ) -> RunReport:
     universe = load_universe()
     retriever = retriever or BM25Retriever()
-    client = client or anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = client or build_client()
     limit = max_iterations or settings.max_iterations
 
     iterations: list[Iteration] = []
@@ -74,14 +78,27 @@ def run_pipeline(
                 "from the provided universe, with no duplicates."
             )
             continue
+        except AllocationTruncatedError as exc:
+            # Retrying identical parameters would truncate identically, so this
+            # ends the loop. Earlier iterations were fully assessed and paid for;
+            # returning them unapproved beats discarding them.
+            usage.append(exc.usage)
+            if iterations:
+                logger.warning("%s — returning the last completed iteration unapproved", exc)
+                break
+            raise
 
         usage.append(allocation_usage)
         logger.info("Allocation Agent: proposed %d positions", len(allocation.positions))
 
-        # The three assessments. Independent by construction — none sees another's
-        # output, so agreement between them is evidence rather than an echo.
+        # The three assessments. Screening never sees the others' output, so its
+        # agreement is evidence rather than an echo. Compliance is the one
+        # exception, and deliberately so: post-execution rules (drawdown
+        # tolerance) are constraints on what the allocation *did*, so the
+        # backtest has to run first. That ordering is the point — it is the only
+        # constraint a proposer cannot satisfy by reading its own instructions.
         backtest = verify_allocation(allocation, mandate)
-        compliance = check_compliance(allocation, mandate, universe=universe)
+        compliance = check_compliance(allocation, mandate, universe=universe, backtest=backtest)
         screening, screening_usage = screen_allocation(
             allocation, mandate, retriever=retriever, client=client
         )

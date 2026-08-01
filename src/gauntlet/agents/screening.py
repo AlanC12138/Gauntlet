@@ -17,7 +17,7 @@ import re
 
 import anthropic
 
-from gauntlet.config import settings
+from gauntlet.config import build_client, settings
 from gauntlet.models import (
     Allocation,
     Mandate,
@@ -171,7 +171,7 @@ def screen_allocation(
     client: anthropic.Anthropic | None = None,
 ) -> tuple[ScreeningReport, LLMUsage]:
     retriever = retriever or BM25Retriever()
-    client = client or anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = client or build_client()
 
     tickers = list(allocation.weights)
     query = " ".join(
@@ -187,6 +187,7 @@ def screen_allocation(
     response = client.messages.parse(
         model=settings.screening_model_id,
         max_tokens=settings.max_tokens,
+        output_config={"effort": settings.effort},
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": _build_prompt(mandate, allocation, retrieved)}],
         output_format=ScreeningProposal,

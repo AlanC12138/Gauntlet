@@ -2,7 +2,7 @@
 
 import pytest
 
-from gauntlet.agents.compliance import check_compliance
+from gauntlet.agents.compliance import PRE_EXECUTION_CHECKS, check_compliance
 from gauntlet.mandates import get_mandate
 from gauntlet.models import Allocation, Constraints, Position
 
@@ -24,16 +24,18 @@ def _rules(report) -> set[str]:
 
 
 def test_clean_allocation_passes(mandate):
-    # 14 names, none above 10%, no sector above 25%.
+    # 15 names, none above 10%, no sector above 25%, and 15% fixed income —
+    # inside the balanced mandate's 10-35% band.
     weights = {
-        "AAPL": 0.08, "MSFT": 0.08, "JPM": 0.08, "V": 0.07, "JNJ": 0.07,
-        "UNH": 0.07, "PG": 0.07, "KO": 0.07, "HON": 0.07, "CAT": 0.07,
-        "NEE": 0.07, "AMT": 0.07, "SPY": 0.07, "AGG": 0.06,
+        "AAPL": 0.07, "MSFT": 0.07, "JPM": 0.07, "V": 0.06, "JNJ": 0.07,
+        "UNH": 0.06, "PG": 0.07, "KO": 0.06, "HON": 0.07, "CAT": 0.06,
+        "NEE": 0.07, "AMT": 0.07, "SPY": 0.05, "AGG": 0.10, "TLT": 0.05,
     }
     report = check_compliance(_alloc(**weights), mandate)
     assert report.passed
     assert report.violations == []
-    assert len(report.checks_run) == 6
+    # Post-execution checks are absent: no backtest was supplied.
+    assert report.checks_run == PRE_EXECUTION_CHECKS
 
 
 def test_position_over_limit_is_flagged(mandate):

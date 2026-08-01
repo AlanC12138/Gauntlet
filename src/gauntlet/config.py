@@ -32,7 +32,24 @@ class Settings(BaseSettings):
     allocation_model: str | None = None
     screening_model: str | None = None
     synthesis_model: str | None = None
-    max_tokens: int = 16_000
+
+    # Adaptive thinking is on by default on Opus 5 and counts against max_tokens.
+    # A first proposal runs ~8k output tokens; a revision costs more, because
+    # "get the drawdown under 15%" is harder than "propose something reasonable".
+    # 16k truncated mid-revision in practice, so this carries real headroom.
+    max_tokens: int = 32_000
+
+    # Thinking depth. `high` is the API default, but revisions are open-ended
+    # here in a way that punishes it: we ask the Allocation Agent to hit a
+    # drawdown target it has no tool to measure, so at `high` it deliberates
+    # until it truncates — observed blowing past 32k output tokens. `medium`
+    # bounds that, and Opus 5 is strong at it.
+    effort: str = "medium"
+
+    # Explicit, and load-bearing: the SDK refuses non-streaming requests it
+    # estimates will exceed ~10 minutes unless a timeout is set outright. With
+    # max_tokens this high, that guard would otherwise reject our own calls.
+    request_timeout_seconds: float = 900.0
 
     @property
     def allocation_model_id(self) -> str:
@@ -60,3 +77,17 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def build_client():
+    """The one place an Anthropic client is constructed.
+
+    Centralized so the timeout above is applied everywhere — a client built
+    ad hoc elsewhere would silently reinstate the SDK's long-request guard.
+    """
+    import anthropic
+
+    return anthropic.Anthropic(
+        api_key=settings.anthropic_api_key,
+        timeout=settings.request_timeout_seconds,
+    )

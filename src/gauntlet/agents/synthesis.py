@@ -29,7 +29,7 @@ import logging
 import anthropic
 from pydantic import BaseModel
 
-from gauntlet.config import settings
+from gauntlet.config import build_client, settings
 from gauntlet.models import (
     Allocation,
     BacktestResult,
@@ -170,11 +170,12 @@ def synthesize(
     iteration: int = 1,
     client: anthropic.Anthropic | None = None,
 ) -> tuple[SynthesisVerdict, LLMUsage]:
-    client = client or anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = client or build_client()
 
     response = client.messages.parse(
         model=settings.synthesis_model_id,
         max_tokens=settings.max_tokens,
+        output_config={"effort": settings.effort},
         system=SYSTEM_PROMPT,
         messages=[
             {

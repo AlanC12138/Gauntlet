@@ -4,7 +4,7 @@ Phase 1 has no persistence — mandates live here until Postgres arrives in Phas
 Windows default to the universe's verified backtest window.
 """
 
-from gauntlet.models import Constraints, Mandate
+from gauntlet.models import AssetClassBand, Constraints, Mandate
 from gauntlet.universe import load_universe
 
 
@@ -27,6 +27,13 @@ def balanced_growth() -> Mandate:
             max_sector_weight=0.25,
             min_holdings=12,
             max_holdings=20,
+            # Typical for a growth mandate with stated drawdown control.
+            max_drawdown_tolerance=0.25,
+            asset_class_bands={
+                "fixed_income": AssetClassBand(min_weight=0.10, max_weight=0.35),
+                "equity": AssetClassBand(min_weight=0.60, max_weight=0.90),
+            },
+            max_volatility=0.14,
         ),
         start=start,
         end=end,
@@ -49,6 +56,15 @@ def conservative_income() -> Mandate:
             max_sector_weight=0.20,
             min_holdings=14,
             max_holdings=20,
+            # Capital-preservation mandates commonly sit at 10-15%.
+            max_drawdown_tolerance=0.15,
+            # A capital-preservation mandate's objective promised "meaningful
+            # fixed-income exposure"; before this, nothing enforced it.
+            asset_class_bands={
+                "fixed_income": AssetClassBand(min_weight=0.30, max_weight=0.60),
+                "equity": AssetClassBand(min_weight=0.35, max_weight=0.65),
+            },
+            max_volatility=0.10,
         ),
         start=start,
         end=end,
@@ -64,8 +80,10 @@ def aggressive_growth_esg() -> Mandate:
         name="Aggressive Growth (ESG-screened)",
         risk_profile="aggressive",
         objective=(
-            "Maximize long-run growth, accepting deep drawdowns. Exclude fossil-fuel "
-            "producers and tobacco."
+            "Maximize long-run growth, accepting deep drawdowns. Exclude tobacco and "
+            "the GICS Energy sector outright. Note that a sector exclusion is a blunt "
+            "proxy for a fossil-fuel screen: flag any remaining hydrocarbon exposure "
+            "held indirectly."
         ),
         constraints=Constraints(
             max_position_weight=0.12,
@@ -74,6 +92,12 @@ def aggressive_growth_esg() -> Mandate:
             max_holdings=18,
             excluded_tickers=["PM"],
             excluded_sectors=["Energy"],
+            # Aggressive mandates accept deep drawdowns explicitly.
+            max_drawdown_tolerance=0.40,
+            asset_class_bands={
+                "equity": AssetClassBand(min_weight=0.85, max_weight=1.00),
+            },
+            max_volatility=0.25,
         ),
         start=start,
         end=end,
@@ -110,6 +134,13 @@ def sustainable_transition() -> Mandate:
             max_sector_weight=0.25,
             min_holdings=12,
             max_holdings=20,
+            # Same risk posture as the balanced mandate.
+            max_drawdown_tolerance=0.25,
+            asset_class_bands={
+                "fixed_income": AssetClassBand(min_weight=0.10, max_weight=0.35),
+                "equity": AssetClassBand(min_weight=0.60, max_weight=0.90),
+            },
+            max_volatility=0.14,
         ),
         start=start,
         end=end,
@@ -146,6 +177,13 @@ def strict_diversification() -> Mandate:
             max_sector_weight=0.12,
             min_holdings=14,
             max_holdings=20,
+            # Breadth-first, but no stated appetite for deep loss.
+            max_drawdown_tolerance=0.30,
+            asset_class_bands={
+                "fixed_income": AssetClassBand(min_weight=0.05, max_weight=0.30),
+                "equity": AssetClassBand(min_weight=0.65, max_weight=0.95),
+            },
+            max_volatility=0.16,
         ),
         start=start,
         end=end,

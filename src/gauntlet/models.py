@@ -22,16 +22,57 @@ RiskProfile = Literal["conservative", "balanced", "aggressive"]
 WEIGHT_SUM_TOLERANCE = 1e-6
 
 
+class AssetClassBand(BaseModel):
+    """An allowed range for one economic exposure bucket, e.g. fixed income
+    between 30% and 60%. Standard in every real balanced mandate."""
+
+    min_weight: float = 0.0
+    max_weight: float = 1.0
+
+
 class Constraints(BaseModel):
-    """Numeric/structural rules. Phase 2's compliance engine enforces these;
-    Phase 1 only passes them to the Allocation Agent as instructions."""
+    """Mandate rules enforced by the deterministic compliance engine.
+
+    Two kinds, and the distinction drives the pipeline's ordering:
+
+    * **Pre-execution** — constraints on the weights themselves (position size,
+      sector concentration, holdings count, exclusions). Checkable the moment a
+      proposal exists, and an agent told the limits can satisfy them directly.
+
+    * **Post-execution** — constraints on what the allocation *did*
+      (`max_drawdown_tolerance`). Not computable from the weights; the backtest
+      has to run first. An agent can aim at these but cannot verify them, which
+      is what makes them the constraint a competent proposer can still miss.
+    """
 
     max_position_weight: float = 0.10
     max_sector_weight: float = 0.25
     min_holdings: int = 8
     max_holdings: int = 20
     excluded_tickers: list[str] = Field(default_factory=list)
+
+    # A blunt instrument, kept because real mandates do sometimes exclude whole
+    # sectors — but note it is NOT a substitute for an activity-based screen.
+    # GICS Energy and "fossil fuel producer" are close but not the same set: this
+    # would miss a coal-burning utility and would catch a renewables-heavy energy
+    # name. Activity exclusions are the Screening Agent's job, by design.
     excluded_sectors: list[str] = Field(default_factory=list)
+
+    # Bands on economic exposure, keyed by bucket: "equity", "fixed_income",
+    # "commodity". Makes objectives like "meaningful fixed-income exposure"
+    # operative instead of leaving them as prose nothing enforces.
+    asset_class_bands: dict[str, AssetClassBand] = Field(default_factory=dict)
+
+    # --- post-execution: only knowable once the backtest has run --------------
+
+    # Positive magnitude: 0.20 means "must not fall more than 20% peak-to-trough".
+    # A portfolio-construction screen over one historical path, NOT a
+    # forward-looking risk guarantee — see data/README.md on survivorship bias.
+    max_drawdown_tolerance: float | None = None
+
+    # Annualized standard deviation ceiling, e.g. 0.10 for 10%. Drawdown's
+    # sibling: also measured after execution, also not predictable in advance.
+    max_volatility: float | None = None
 
 
 class Mandate(BaseModel):

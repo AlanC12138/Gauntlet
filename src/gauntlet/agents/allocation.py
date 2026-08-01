@@ -10,7 +10,7 @@ import logging
 
 import anthropic
 
-from gauntlet.config import settings
+from gauntlet.config import build_client, settings
 from gauntlet.models import Allocation, AllocationProposal, Mandate, Position
 from gauntlet.universe import Universe, load_universe
 from gauntlet.usage import LLMUsage, usage_from_response
@@ -29,6 +29,20 @@ class AllocationValidationError(ValueError):
     pipeline needs them for honest cost accounting even though the proposal was
     discarded. Also carries the feedback the Allocation Agent should receive on
     its next attempt: a malformed proposal is a revision trigger, not a crash.
+    """
+
+    def __init__(self, message: str, usage: LLMUsage) -> None:
+        super().__init__(message)
+        self.usage = usage
+
+
+class AllocationTruncatedError(RuntimeError):
+    """The response was cut off before the proposal was complete.
+
+    Distinct from a validation failure: there is no proposal to critique, and
+    re-asking with identical parameters would very likely truncate identically.
+    So the pipeline does not retry on this — it preserves whatever iterations
+    already completed rather than discarding paid-for work.
     """
 
     def __init__(self, message: str, usage: LLMUsage) -> None:
@@ -62,6 +76,26 @@ def _render_constraints(mandate: Mandate) -> str:
         f"- Maximum weight in any single GICS sector: {c.max_sector_weight:.1%}",
         f"- Number of holdings: between {c.min_holdings} and {c.max_holdings}",
     ]
+    if c.max_drawdown_tolerance is not None:
+        # Stated so the agent can aim at it, though it cannot verify it: the
+        # drawdown is only known once the allocation is backtested. Getting this
+        # wrong is the expected reason for a revision cycle, not a failure.
+        lines.append(
+            f"- Maximum peak-to-trough drawdown over the backtest window: "
+            f"{c.max_drawdown_tolerance:.1%}. This is measured by executing your "
+            f"allocation against historical prices, so you cannot verify it in "
+            f"advance — construct defensively enough to stay within it."
+        )
+    if c.max_volatility is not None:
+        lines.append(
+            f"- Maximum annualized volatility over the backtest window: "
+            f"{c.max_volatility:.1%}. Also measured after execution."
+        )
+    for bucket, band in c.asset_class_bands.items():
+        lines.append(
+            f"- {bucket.replace('_', ' ').title()} exposure must be between "
+            f"{band.min_weight:.0%} and {band.max_weight:.0%} of the portfolio."
+        )
     if c.excluded_tickers:
         lines.append(f"- Excluded tickers (must not appear): {', '.join(c.excluded_tickers)}")
     if c.excluded_sectors:
@@ -149,11 +183,12 @@ def propose_allocation(
     Synthesis Agent's loop-back uses in Phase 2. Unused by the Phase 1 loop.
     """
     universe = universe or load_universe()
-    client = client or anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = client or build_client()
 
     response = client.messages.parse(
         model=settings.allocation_model_id,
         max_tokens=settings.max_tokens,
+        output_config={"effort": settings.effort},
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": _build_prompt(mandate, universe, feedback)}],
         output_format=AllocationProposal,
@@ -162,9 +197,11 @@ def propose_allocation(
     if response.stop_reason == "refusal":
         raise RuntimeError(f"Allocation Agent request was refused: {response.stop_details}")
     if response.stop_reason == "max_tokens":
-        raise RuntimeError(
-            "Allocation Agent hit max_tokens before completing its proposal; "
-            f"raise GAUNTLET_MAX_TOKENS above {settings.max_tokens}"
+        raise AllocationTruncatedError(
+            "Allocation Agent hit max_tokens before completing its proposal "
+            f"({settings.max_tokens}). Lower GAUNTLET_EFFORT or raise "
+            "GAUNTLET_MAX_TOKENS.",
+            usage_from_response("Allocation Agent", settings.allocation_model_id, response),
         )
     if response.parsed_output is None:
         raise RuntimeError(f"Allocation Agent returned unparseable output ({response.stop_reason})")

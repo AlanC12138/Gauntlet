@@ -18,24 +18,33 @@ simplification rather than look-through.
 
 import logging
 
-from gauntlet.models import Allocation, ComplianceReport, Mandate, Violation
-from gauntlet.universe import Universe, load_universe, sector_exposures
+from gauntlet.models import Allocation, BacktestResult, ComplianceReport, Mandate, Violation
+from gauntlet.universe import (
+    Universe,
+    asset_class_exposures,
+    load_universe,
+    sector_exposures,
+)
 
 logger = logging.getLogger(__name__)
 
 # Weights are normalized upstream, so anything beyond float noise is a real fault.
 WEIGHT_SUM_TOLERANCE = 1e-6
 
-# Guards against a cap that is arithmetically impossible to satisfy — e.g. a 5%
-# position limit with at most 12 holdings can only ever reach 60% invested.
-CHECKS = [
+# Checkable from the weights alone.
+PRE_EXECUTION_CHECKS = [
     "weights_sum_to_one",
     "max_position_weight",
     "max_sector_weight",
     "holdings_count",
     "excluded_tickers",
     "excluded_sectors",
+    "asset_class_bands",
 ]
+
+# Require the backtest to have run. Reported in `checks_run` only when the result
+# was actually supplied, so a skipped check never reads as a passed one.
+POST_EXECUTION_CHECKS = ["max_drawdown_tolerance", "max_volatility"]
 
 
 def _pct(x: float) -> str:
@@ -46,7 +55,15 @@ def check_compliance(
     allocation: Allocation,
     mandate: Mandate,
     universe: Universe | None = None,
+    backtest: BacktestResult | None = None,
 ) -> ComplianceReport:
+    """Check an allocation against its mandate.
+
+    `backtest` is optional so the weight-level rules stay checkable without
+    executing anything — useful in tests and for a fast pre-flight. Omitting it
+    when the mandate sets `max_drawdown_tolerance` skips that check and leaves it
+    out of `checks_run`, so the report never implies a check that did not run.
+    """
     universe = universe or load_universe()
     constraints = mandate.constraints
     weights = allocation.weights
@@ -163,16 +180,98 @@ def check_compliance(
                 )
             )
 
+    # --- asset-class bands ---------------------------------------------------
+    if constraints.asset_class_bands:
+        buckets = asset_class_exposures(weights)
+        for bucket, band in constraints.asset_class_bands.items():
+            actual = buckets.get(bucket, 0.0)
+            if actual < band.min_weight - WEIGHT_SUM_TOLERANCE:
+                violations.append(
+                    Violation(
+                        rule="asset_class_bands",
+                        message=(
+                            f"{bucket.replace('_', ' ')} exposure is {_pct(actual)}, below "
+                            f"the mandate's {_pct(band.min_weight)} minimum."
+                        ),
+                        detail={"bucket": bucket, "actual": f"{actual:.6f}",
+                                "minimum": f"{band.min_weight:.6f}"},
+                    )
+                )
+            elif actual > band.max_weight + WEIGHT_SUM_TOLERANCE:
+                violations.append(
+                    Violation(
+                        rule="asset_class_bands",
+                        message=(
+                            f"{bucket.replace('_', ' ')} exposure is {_pct(actual)}, above "
+                            f"the mandate's {_pct(band.max_weight)} maximum."
+                        ),
+                        detail={"bucket": bucket, "actual": f"{actual:.6f}",
+                                "maximum": f"{band.max_weight:.6f}"},
+                    )
+                )
+
+    # --- post-execution: realized risk ---------------------------------------
+    checks_run = list(PRE_EXECUTION_CHECKS)
+    tolerance = constraints.max_drawdown_tolerance
+    vol_ceiling = constraints.max_volatility
+    wants_post = tolerance is not None or vol_ceiling is not None
+
+    if wants_post and backtest is not None:
+        checks_run += POST_EXECUTION_CHECKS
+
+        if tolerance is not None:
+            # metrics.max_drawdown is negative; tolerance is a positive magnitude.
+            realized = backtest.metrics.max_drawdown
+            if realized < -tolerance - WEIGHT_SUM_TOLERANCE:
+                violations.append(
+                    Violation(
+                        rule="max_drawdown_tolerance",
+                        message=(
+                            f"The allocation fell {_pct(abs(realized))} peak-to-trough over "
+                            f"{backtest.start}..{backtest.end}, exceeding the mandate's "
+                            f"{_pct(tolerance)} drawdown tolerance."
+                        ),
+                        detail={
+                            "realized_drawdown": f"{realized:.6f}",
+                            "tolerance": f"{-tolerance:.6f}",
+                            "window": f"{backtest.start}..{backtest.end}",
+                        },
+                    )
+                )
+
+        if vol_ceiling is not None:
+            realized_vol = backtest.metrics.annualized_volatility
+            if realized_vol > vol_ceiling + WEIGHT_SUM_TOLERANCE:
+                violations.append(
+                    Violation(
+                        rule="max_volatility",
+                        message=(
+                            f"Annualized volatility was {_pct(realized_vol)} over "
+                            f"{backtest.start}..{backtest.end}, exceeding the mandate's "
+                            f"{_pct(vol_ceiling)} ceiling."
+                        ),
+                        detail={
+                            "realized_volatility": f"{realized_vol:.6f}",
+                            "ceiling": f"{vol_ceiling:.6f}",
+                        },
+                    )
+                )
+    elif wants_post:
+        logger.warning(
+            "Mandate sets post-execution risk limits but no backtest was supplied; "
+            "skipping those checks"
+        )
+
     report = ComplianceReport(
         passed=not violations,
         violations=violations,
-        checks_run=CHECKS,
+        checks_run=checks_run,
         sector_exposures=exposures,
     )
     logger.info(
         "Compliance: %s (%d violation(s) across %d checks)",
         "PASS" if report.passed else "FAIL",
         len(violations),
-        len(CHECKS),
+        len(checks_run),
     )
     return report

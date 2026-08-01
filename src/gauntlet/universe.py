@@ -67,6 +67,34 @@ def load_universe() -> Universe:
         return Universe.model_validate(json.load(f))
 
 
+# Economic exposure buckets for asset-class bands. Distinct from
+# `sector_cap_treatment`, which answers a different question: SPY is `diversified`
+# (exempt from sector caps) but is unambiguously *equity* exposure. Conflating the
+# two would let a mandate's bond floor be satisfied by an equity index fund.
+ECONOMIC_BUCKET: dict[str, str] = {
+    "equity": "equity",
+    "sector_etf": "equity",
+    "equity_etf": "equity",
+    "bond_etf": "fixed_income",
+    "commodity_etf": "commodity",
+}
+
+
+def asset_class_exposures(weights: dict[str, float]) -> dict[str, float]:
+    """Aggregate weights into equity / fixed_income / commodity buckets.
+
+    No look-through: a balanced fund holding both stocks and bonds would be
+    miscounted. Our universe has none, but the limitation is real — see
+    data/README.md.
+    """
+    exposures: dict[str, float] = {}
+    universe = load_universe()
+    for ticker, weight in weights.items():
+        bucket = ECONOMIC_BUCKET[universe.by_ticker(ticker).asset_class]
+        exposures[bucket] = exposures.get(bucket, 0.0) + weight
+    return dict(sorted(exposures.items(), key=lambda kv: -kv[1]))
+
+
 def sector_exposures(weights: dict[str, float]) -> dict[str, float]:
     """Aggregate weights by GICS sector.
 
