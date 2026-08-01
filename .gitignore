@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+
+# Price cache — regenerable from yfinance via `gauntlet fetch`
+data/cache/

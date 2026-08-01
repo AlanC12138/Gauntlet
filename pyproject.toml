@@ -1,0 +1,39 @@
+[tool.poetry]
+name = "gauntlet"
+version = "0.1.0"
+description = "Multi-agent portfolio construction: propose, then verify by execution."
+authors = ["Alan Chen <alanchen0705@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "gauntlet", from = "src" }]
+
+[tool.poetry.dependencies]
+# Versions below are the ones this was actually built and tested against.
+python = "^3.13"
+anthropic = "^0.120"
+pandas = "^3.0"
+numpy = "^2.5"
+yfinance = "^1.5"
+pyarrow = "^25.0"
+pydantic = "^2.13"
+pydantic-settings = "^2.14"
+fastapi = "^0.141"
+uvicorn = { extras = ["standard"], version = "^0.52" }
+typer = "^0.27"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+ruff = "^0.8"
+
+[tool.poetry.scripts]
+gauntlet = "gauntlet.cli:app"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

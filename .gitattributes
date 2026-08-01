@@ -1,0 +1,6 @@
+# Normalize to LF in the repository regardless of the checkout platform.
+# Without this, a Windows checkout stores CRLF and every file reads as fully
+# rewritten when cloned on Linux or macOS.
+* text=auto eol=lf
+
+*.parquet binary

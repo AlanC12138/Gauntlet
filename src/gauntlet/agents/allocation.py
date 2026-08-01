@@ -1,0 +1,165 @@
+"""Allocation Agent — proposes portfolio weights from a mandate.
+
+The only LLM in the Phase 1 loop. It emits an `AllocationProposal` via structured
+output; this module then validates it into an `Allocation` before anything
+downstream sees it. That boundary matters: the agent's job is to propose, and
+nothing here treats its output as trustworthy just because it parsed.
+"""
+
+import logging
+
+import anthropic
+
+from gauntlet.config import settings
+from gauntlet.models import Allocation, AllocationProposal, Mandate, Position
+from gauntlet.universe import Universe, load_universe
+from gauntlet.usage import LLMUsage, usage_from_response
+
+logger = logging.getLogger(__name__)
+
+# Beyond this, the weights aren't float noise — the agent misunderstood the task
+# and normalizing would paper over it.
+MAX_WEIGHT_SUM_DRIFT = 0.05
+
+SYSTEM_PROMPT = """\
+You are a portfolio construction analyst. Given an investment mandate and a fixed \
+investable universe, you propose a set of portfolio weights.
+
+Ground your proposal in portfolio theory: diversify across sectors and risk factors, \
+size positions according to the mandate's risk profile, and avoid concentration that \
+isn't compensated by expected return. Explain each position in terms of the role it \
+plays in the portfolio, not in terms of a price forecast.
+
+Hard requirements:
+- Use ONLY tickers from the provided universe. Do not invent tickers.
+- Weights must be positive fractions summing to exactly 1.0. No shorts, no leverage.
+- Respect every constraint in the mandate.
+
+Your allocation will be backtested against real historical price data and checked \
+against the mandate's constraints programmatically. Propose something that will \
+survive that, not something that merely reads well.\
+"""
+
+
+def _render_constraints(mandate: Mandate) -> str:
+    c = mandate.constraints
+    lines = [
+        f"- Maximum weight in any single position: {c.max_position_weight:.1%}",
+        f"- Maximum weight in any single GICS sector: {c.max_sector_weight:.1%}",
+        f"- Number of holdings: between {c.min_holdings} and {c.max_holdings}",
+    ]
+    if c.excluded_tickers:
+        lines.append(f"- Excluded tickers (must not appear): {', '.join(c.excluded_tickers)}")
+    if c.excluded_sectors:
+        lines.append(f"- Excluded sectors (must not appear): {', '.join(c.excluded_sectors)}")
+    return "\n".join(lines)
+
+
+def _build_prompt(mandate: Mandate, universe: Universe, feedback: str | None) -> str:
+    sections = [
+        "# Mandate",
+        f"Name: {mandate.name}",
+        f"Risk profile: {mandate.risk_profile}",
+        f"Objective: {mandate.objective}",
+        f"Backtest window: {mandate.start} to {mandate.end}",
+        f"Rebalance schedule: {mandate.rebalance}",
+        f"Initial capital: ${mandate.initial_capital:,.0f}",
+        "",
+        "# Constraints",
+        _render_constraints(mandate),
+        "",
+        "# Investable universe",
+        "Ticker, GICS sector, name. Instruments marked diversified are broad-market or",
+        "non-equity and are exempt from sector caps.",
+        "",
+        universe.catalog(),
+    ]
+    if feedback:
+        sections += [
+            "",
+            "# Revision required",
+            "A previous proposal was rejected. Address every point below in this revision:",
+            feedback,
+        ]
+    return "\n".join(sections)
+
+
+def _validate(proposal: AllocationProposal, universe: Universe) -> Allocation:
+    """Turn a raw proposal into a validated, normalized Allocation."""
+    if not proposal.positions:
+        raise ValueError("Allocation Agent returned no positions")
+
+    unknown = sorted({p.ticker for p in proposal.positions} - set(universe.tickers))
+    if unknown:
+        raise ValueError(f"Allocation Agent proposed tickers outside the universe: {unknown}")
+
+    duplicates = sorted(
+        {p.ticker for p in proposal.positions if
+         sum(q.ticker == p.ticker for q in proposal.positions) > 1}
+    )
+    if duplicates:
+        raise ValueError(f"Allocation Agent returned duplicate positions: {duplicates}")
+
+    non_positive = sorted(p.ticker for p in proposal.positions if p.weight <= 0)
+    if non_positive:
+        raise ValueError(f"Allocation Agent returned non-positive weights for: {non_positive}")
+
+    total = sum(p.weight for p in proposal.positions)
+    if abs(total - 1.0) > MAX_WEIGHT_SUM_DRIFT:
+        raise ValueError(f"Allocation Agent's weights sum to {total:.4f}, expected ~1.0")
+    if total != 1.0:
+        logger.debug("Normalizing proposed weights from %.9f to 1.0", total)
+
+    return Allocation(
+        strategy_summary=proposal.strategy_summary,
+        positions=[
+            Position(ticker=p.ticker, weight=p.weight / total, rationale=p.rationale)
+            for p in proposal.positions
+        ],
+    )
+
+
+def propose_allocation(
+    mandate: Mandate,
+    universe: Universe | None = None,
+    feedback: str | None = None,
+    client: anthropic.Anthropic | None = None,
+) -> tuple[Allocation, LLMUsage]:
+    """Ask Claude for an allocation and validate it against the universe.
+
+    Returns the validated allocation and the call's token spend. Usage is
+    returned rather than logged so the pipeline can aggregate it across agents
+    once Phase 2 adds Screening and Synthesis.
+
+    `feedback` carries rejection reasons back from a prior proposal — the hook the
+    Synthesis Agent's loop-back uses in Phase 2. Unused by the Phase 1 loop.
+    """
+    universe = universe or load_universe()
+    client = client or anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+    response = client.messages.parse(
+        model=settings.model,
+        max_tokens=settings.max_tokens,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": _build_prompt(mandate, universe, feedback)}],
+        output_format=AllocationProposal,
+    )
+
+    if response.stop_reason == "refusal":
+        raise RuntimeError(f"Allocation Agent request was refused: {response.stop_details}")
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError(
+            "Allocation Agent hit max_tokens before completing its proposal; "
+            f"raise GAUNTLET_MAX_TOKENS above {settings.max_tokens}"
+        )
+    if response.parsed_output is None:
+        raise RuntimeError(f"Allocation Agent returned unparseable output ({response.stop_reason})")
+
+    usage = usage_from_response("Allocation Agent", settings.model, response)
+    logger.info(
+        "Allocation Agent: %d in / %d out tokens (~$%s)",
+        usage.input_tokens,
+        usage.output_tokens,
+        f"{usage.cost_usd:.4f}" if usage.cost_usd is not None else "unknown",
+    )
+    return _validate(response.parsed_output, universe), usage
