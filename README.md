@@ -15,9 +15,14 @@ See [MVP.md](MVP.md) for scope/phases and [TECH_STACK.md](TECH_STACK.md) for sta
 
 ## Status
 
-**Phase 1 (core agents) built.** The Allocation Agent proposes weights and the Verification Agent backtests them against real cached price data, driven from a CLI or a synchronous FastAPI endpoint. The demo universe is pinned and verified — 47 instruments across all 11 GICS sectors, 2013–2025, see [data/README.md](data/README.md).
+**Phases 1–2 built.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 47 instruments across all 11 GICS sectors, 2013–2025, see [data/README.md](data/README.md).
 
-Phase 2 (compliance + screening + the Synthesis Agent's loop-back) is next.
+Two guarantees are enforced in code rather than requested in a prompt:
+
+- **Screening findings must be grounded.** Every finding has to quote a retrieved document verbatim; excerpts that appear in no retrieved note are dropped before the supervisor sees them. This has caught a live hallucination.
+- **Compliance is binding, screening is advisory.** If the deterministic rules engine reports a violation the verdict is `revise` regardless of what the Synthesis Agent decided — an LLM that can talk past an arithmetic breach makes the rules engine decorative. Screening findings are LLM judgment and *can* be weighed, with justification.
+
+Phase 3 (the two-part eval harness) is next.
 
 ## Running it
 

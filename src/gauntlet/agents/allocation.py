@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 # and normalizing would paper over it.
 MAX_WEIGHT_SUM_DRIFT = 0.05
 
+
+class AllocationValidationError(ValueError):
+    """A proposal that did not survive validation.
+
+    Carries the call's token spend because the tokens were still billed — the
+    pipeline needs them for honest cost accounting even though the proposal was
+    discarded. Also carries the feedback the Allocation Agent should receive on
+    its next attempt: a malformed proposal is a revision trigger, not a crash.
+    """
+
+    def __init__(self, message: str, usage: LLMUsage) -> None:
+        super().__init__(message)
+        self.usage = usage
+
 SYSTEM_PROMPT = """\
 You are a portfolio construction analyst. Given an investment mandate and a fixed \
 investable universe, you propose a set of portfolio weights.
@@ -138,7 +152,7 @@ def propose_allocation(
     client = client or anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     response = client.messages.parse(
-        model=settings.model,
+        model=settings.allocation_model_id,
         max_tokens=settings.max_tokens,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": _build_prompt(mandate, universe, feedback)}],
@@ -155,11 +169,16 @@ def propose_allocation(
     if response.parsed_output is None:
         raise RuntimeError(f"Allocation Agent returned unparseable output ({response.stop_reason})")
 
-    usage = usage_from_response("Allocation Agent", settings.model, response)
+    usage = usage_from_response("Allocation Agent", settings.allocation_model_id, response)
     logger.info(
         "Allocation Agent: %d in / %d out tokens (~$%s)",
         usage.input_tokens,
         usage.output_tokens,
         f"{usage.cost_usd:.4f}" if usage.cost_usd is not None else "unknown",
     )
-    return _validate(response.parsed_output, universe), usage
+    try:
+        return _validate(response.parsed_output, universe), usage
+    except ValueError as exc:
+        # Re-raise with the usage attached so the pipeline can bill the attempt
+        # and route it back for revision instead of dying.
+        raise AllocationValidationError(str(exc), usage) from exc

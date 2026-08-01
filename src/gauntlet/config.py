@@ -21,11 +21,39 @@ class Settings(BaseSettings):
     # it's the Anthropic SDK's own env var, not ours.
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
 
+    # Default for every agent. The per-agent overrides below exist because the
+    # roles have genuinely different requirements: proposing is generative,
+    # screening is grounded classification, supervising is the governance layer
+    # and wants the strongest model. Running a cheaper proposer under a strong
+    # supervisor is a legitimate configuration, not a downgrade — it is the
+    # setup where the deterministic checks and loop-back actually earn their
+    # keep. Each falls back to `model` when unset.
     model: str = "claude-opus-5"
+    allocation_model: str | None = None
+    screening_model: str | None = None
+    synthesis_model: str | None = None
     max_tokens: int = 16_000
+
+    @property
+    def allocation_model_id(self) -> str:
+        return self.allocation_model or self.model
+
+    @property
+    def screening_model_id(self) -> str:
+        return self.screening_model or self.model
+
+    @property
+    def synthesis_model_id(self) -> str:
+        return self.synthesis_model or self.model
 
     universe_path: Path = DATA_DIR / "universe.json"
     price_cache_path: Path = DATA_DIR / "cache" / "prices.parquet"
+
+    # How many ESG notes to put in the Screening Agent's context.
+    screening_top_k: int = 6
+    # Bound on the propose -> verify -> govern loop. Without this a Synthesis
+    # Agent and an Allocation Agent that disagree would run until the budget dies.
+    max_iterations: int = 3
 
     # Annualized, used for Sharpe/Sortino. 0.0 keeps the eval reference values simple.
     risk_free_rate: float = 0.0

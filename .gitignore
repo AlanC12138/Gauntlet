@@ -10,3 +10,6 @@ dist/
 
 # Price cache — regenerable from yfinance via `gauntlet fetch`
 data/cache/
+
+# Local run artifacts
+out/

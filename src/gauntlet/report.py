@@ -17,6 +17,26 @@ def render(report: RunReport) -> str:
     lines.append(report.mandate.objective)
     lines.append("")
 
+    verdict = "APPROVED" if report.approved else "NOT APPROVED"
+    rounds = len(report.iterations)
+    lines.append(
+        f"VERDICT: {verdict}  "
+        f"({rounds} iteration{'s' if rounds != 1 else ''}"
+        f"{', loop-back exercised' if rounds > 1 else ''})"
+    )
+    lines.append("")
+
+    if rounds > 1:
+        lines.append("-- Revision history " + "-" * 52)
+        for it in report.iterations:
+            outcome = it.verdict.decision.upper()
+            lines.append(f"  Iteration {it.index}: {outcome}")
+            if it.verdict.decision == "revise":
+                reason = it.verdict.revision_feedback or it.verdict.reasoning
+                for line in reason.strip().splitlines()[:6]:
+                    lines.append(f"      {line.strip()}")
+        lines.append("")
+
     lines.append("-- Strategy " + "-" * 60)
     lines.append(report.allocation.strategy_summary)
     lines.append("")
@@ -30,6 +50,33 @@ def render(report: RunReport) -> str:
     for sector, weight in report.sector_exposures.items():
         bar = "#" * round(weight * 60)
         lines.append(f"  {sector:<24} {_pct(weight)}  {bar}")
+    lines.append("")
+
+    c = report.compliance
+    lines.append("-- Compliance (deterministic) " + "-" * 42)
+    if c.passed:
+        lines.append(f"  PASS — no violations across {len(c.checks_run)} checks")
+    else:
+        lines.append(f"  FAIL — {len(c.violations)} violation(s)")
+        for v in c.violations:
+            lines.append(f"    [{v.rule}] {v.message}")
+    lines.append("")
+
+    s = report.screening
+    lines.append("-- Screening (RAG-grounded) " + "-" * 44)
+    if not s.findings:
+        lines.append(f"  PASS — no findings across {len(s.tickers_screened)} holdings")
+    else:
+        lines.append(f"  {'PASS' if s.passed else 'FAIL'} — {len(s.findings)} finding(s)")
+        for f in s.findings:
+            verb = "EXCLUDE" if f.recommend_exclude else "flag"
+            lines.append(f"    {f.ticker:<6} [{verb}] {f.category}: {f.concern}")
+            lines.append(f"           source: {f.source}")
+    if s.ungrounded_findings_dropped:
+        lines.append(
+            f"  ({s.ungrounded_findings_dropped} finding(s) dropped — excerpt not found "
+            "in any retrieved note)"
+        )
     lines.append("")
 
     b = report.backtest
@@ -64,8 +111,18 @@ def render(report: RunReport) -> str:
             )
         total = report.total_cost_usd
         total_str = f"${total:.4f}" if total is not None else "unknown"
-        lines.append(f"  {'TOTAL':<20} {'':<18} {report.total_tokens:>7,} tokens{'':>13}{total_str:>10}")
+        lines.append(
+            f"  {'TOTAL':<20} {'':<18} {report.total_tokens:>7,} tokens"
+            f"{'':>13}{total_str:>10}"
+        )
         lines.append("")
+
+    if report.verdict.memo:
+        lines.append("-- Investment committee memo " + "-" * 43)
+        for line in report.verdict.memo.strip().splitlines():
+            lines.append(f"  {line}")
+        lines.append("")
+
     lines.append(
         "Note: backtest returns are computed over a survivorship-biased universe "
         "and exclude transaction costs. See data/README.md."

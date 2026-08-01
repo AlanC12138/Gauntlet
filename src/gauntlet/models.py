@@ -124,14 +124,97 @@ class BacktestResult(BaseModel):
     drawdown_curve: list[tuple[date, float]]
 
 
+# --- Constraint-Compliance Agent output -------------------------------------
+
+
+class Violation(BaseModel):
+    """One broken rule. `rule` is machine-readable so the eval harness can score
+    per-rule precision/recall; `message` is what the Synthesis Agent reads."""
+
+    rule: str
+    message: str
+    detail: dict[str, str] = Field(default_factory=dict)
+
+
+class ComplianceReport(BaseModel):
+    """Deterministic. No LLM touches this — that is the point of the agent."""
+
+    passed: bool
+    violations: list[Violation]
+    checks_run: list[str]
+    sector_exposures: dict[str, float]
+
+
+# --- Screening Agent output --------------------------------------------------
+
+
+class ScreeningFinding(BaseModel):
+    ticker: str
+    category: str
+    concern: str
+    # Verbatim support from a retrieved document. An unsupported finding is a
+    # hallucination, and the validator rejects it.
+    excerpt: str
+    source: str
+    recommend_exclude: bool
+
+
+class ScreeningProposal(BaseModel):
+    """Raw Screening Agent output, before grounding validation. Same
+    proposal/validated split as AllocationProposal — see module docstring."""
+
+    findings: list[ScreeningFinding]
+
+
+class ScreeningReport(BaseModel):
+    passed: bool
+    findings: list[ScreeningFinding]
+    tickers_screened: list[str]
+    # Findings dropped because their excerpt appeared in no retrieved document.
+    ungrounded_findings_dropped: int = 0
+
+
+# --- Synthesis Agent output --------------------------------------------------
+
+
+class SynthesisVerdict(BaseModel):
+    decision: Literal["approve", "revise"]
+    reasoning: str
+    # Populated only on "revise" — fed back to the Allocation Agent verbatim.
+    revision_feedback: str | None = None
+    # Populated only on "approve" — the investment-committee memo.
+    memo: str | None = None
+
+
+class Iteration(BaseModel):
+    """One trip around the propose/verify/govern loop."""
+
+    index: int
+    allocation: Allocation
+    backtest: BacktestResult
+    compliance: ComplianceReport
+    screening: ScreeningReport
+    verdict: SynthesisVerdict
+
+
 class RunReport(BaseModel):
-    """Phase 1 deliverable: propose -> backtest. Compliance, screening, and the
-    Synthesis Agent's verdict join this in Phase 2."""
+    """The full propose/verify/govern run, including any loop-back iterations."""
 
     mandate: Mandate
     allocation: Allocation
     backtest: BacktestResult
     sector_exposures: dict[str, float]
+    compliance: ComplianceReport
+    screening: ScreeningReport
+    verdict: SynthesisVerdict
+    # Every assessed attempt, in order. len() > 1 means the Synthesis Agent sent
+    # it back.
+    iterations: list[Iteration] = Field(default_factory=list)
+    # Proposals rejected by validation before any assessment ran — malformed
+    # weights, unknown tickers, duplicates. These consume an iteration and are
+    # billed, so they are recorded rather than silently retried.
+    malformed_proposals: list[str] = Field(default_factory=list)
+    approved: bool = False
     usage: list[LLMUsage] = Field(default_factory=list)
 
     @property
