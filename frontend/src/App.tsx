@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, type MandateOption, type RunSummary } from "./api";
+import { api, ApiError, type Constraints, type MandateOption, type RunSummary } from "./api";
 import { AuthControls, useToken, WhenCanRun } from "./auth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { MandateBuilder } from "./components/MandateBuilder";
 import { ProgressTimeline } from "./components/ProgressTimeline";
 import { Results } from "./components/Results";
 import { useRunEvents } from "./useRunEvents";
@@ -27,10 +28,17 @@ export default function App() {
     if (result) api.listRuns().then(setRecent).catch(() => undefined);
   }, [result]);
 
-  async function start() {
+  async function start(constraints?: Constraints) {
     setStartError(null);
+    const preset = mandates.find((m) => m.key === selected);
+    // An edited constraint set is sent as a full inline mandate; an untouched
+    // preset is sent by key, so the server stays the source of truth for it.
+    const body =
+      constraints && preset
+        ? { mandate: { ...preset.mandate, constraints } }
+        : { mandate_name: selected };
     try {
-      const { run_id } = await api.startRun({ mandate_name: selected }, await getToken());
+      const { run_id } = await api.startRun(body, await getToken());
       setRunId(run_id);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -46,6 +54,7 @@ export default function App() {
   }
 
   const running = runId !== null && result === null && error === null;
+  const selectedMandate = mandates.find((m) => m.key === selected);
 
   return (
     <div className="app">
@@ -77,24 +86,31 @@ export default function App() {
             </option>
           ))}
         </select>
-        {/* Browsing is open; only starting a run needs an account, because only
-            starting a run spends money. */}
-        <WhenCanRun
-          fallback={
-            <span className="muted">
-              Sign in to start a run — everything below stays open to browse.
-            </span>
-          }
-        >
-          <button onClick={start} disabled={running}>
-            {running ? "Running…" : "Run the gauntlet"}
-          </button>
-          <span className="muted">A run takes 1–3 minutes and costs roughly $0.20.</span>
-        </WhenCanRun>
+        <span className="muted">A run takes 1–3 minutes and costs roughly $0.20.</span>
       </section>
 
       {startError && <p className="error">{startError}</p>}
       {error && <p className="error">Lost the progress stream: {error}</p>}
+
+      {/* Browsing is open; only starting a run needs an account, because only
+          starting a run spends money. */}
+      {selectedMandate && !runId && (
+        <WhenCanRun
+          fallback={
+            <p className="muted">
+              Sign in to start a run — the mandate presets, past runs, and their full
+              reports stay open to browse.
+            </p>
+          }
+        >
+          <MandateBuilder
+            base={selectedMandate.mandate}
+            onRun={start}
+            disabled={running}
+            runLabel={running ? "Running…" : "Run the gauntlet"}
+          />
+        </WhenCanRun>
+      )}
 
       {/* Hidden for a historical run with no stored events — progress expires
           after 24h while reports are kept, and "waiting for the worker" beside a

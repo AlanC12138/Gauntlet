@@ -20,9 +20,12 @@ Constraints on *weights* (position caps, holdings counts, asset-class bands) are
 checkable here exactly. Constraints on *results* (`max_drawdown_tolerance`,
 `max_volatility`) are not: knowing whether a 12% drawdown is reachable means
 solving an optimization over historical prices, not evaluating an inequality.
-Those are reported as `None` ranges and left to Phase 5, which can afford to
-backtest a most-defensive-feasible portfolio and quote its drawdown as an
-*existence proof* — "we can construct 11%" — never as an impossibility proof.
+
+Those are answered separately and more weakly, by `reachability.py`: it builds a
+defensive portfolio, backtests it, and quotes what it achieved as an *existence
+proof* — "we can construct 11%" — never as an impossibility proof. That bound is
+opt-in via `include_risk_bounds`, because it costs a backtest while everything
+else here is arithmetic.
 
 ## Single source of truth
 
@@ -191,7 +194,9 @@ def find_problems(constraints: Constraints, universe: Universe | None = None) ->
 
 
 def feasible_ranges(
-    constraints: Constraints, universe: Universe | None = None
+    constraints: Constraints,
+    universe: Universe | None = None,
+    include_risk_bounds: bool = False,
 ) -> dict[str, FieldRange]:
     """Legal range for each field, holding the others at their current values.
 
@@ -296,25 +301,82 @@ def feasible_ranges(
             note=None,
         )
 
-    # --- deferred to Phase 5 -------------------------------------------------
-    for field in DEFERRED_FIELDS:
-        ranges[field] = FieldRange(
-            lower=None,
-            upper=None,
-            note=(
-                "Measured after execution. Whether a given level is reachable requires "
-                "backtesting a candidate portfolio, not arithmetic — deferred to Phase 5."
-            ),
-        )
-
+    ranges.update(_risk_ranges(constraints, universe, include_risk_bounds))
     return ranges
 
 
-def assess(constraints: Constraints, universe: Universe | None = None) -> FeasibilityReport:
+def _risk_ranges(
+    constraints: Constraints, universe: Universe, include_risk_bounds: bool
+) -> dict[str, FieldRange]:
+    """Bounds for the post-execution constraints.
+
+    These are the one place a bound is *evidence* rather than arithmetic, and the
+    asymmetry is deliberate: the number is a witness — a portfolio that actually
+    achieved it — so a target at or above it is demonstrably reachable, while a
+    target below it is merely unproven. `lower` is therefore left None and the
+    achieved level is carried in the note, because putting it in `lower` would
+    make a widget disable targets that may well be attainable.
+    """
+    unbounded = {
+        field: FieldRange(
+            lower=None,
+            upper=None,
+            note=(
+                "Measured after execution. Reachability needs a backtested "
+                "candidate portfolio, not arithmetic."
+            ),
+        )
+        for field in DEFERRED_FIELDS
+    }
+    if not include_risk_bounds:
+        return unbounded
+
+    from gauntlet.reachability import cached_witness
+
+    witness = cached_witness(constraints, universe)
+    if witness is None:
+        return unbounded
+
+    return {
+        "max_drawdown_tolerance": FieldRange(
+            lower=None,
+            upper=1.0,
+            note=(
+                f"A defensive portfolio built from these constraints "
+                f"({witness.holdings} holdings) held its drawdown to "
+                f"{witness.max_drawdown:.1%} over the backtest window, so anything at "
+                f"or above that is demonstrably reachable. A tighter target is not "
+                f"proven impossible — only unachieved by this construction."
+            ),
+        ),
+        "max_volatility": FieldRange(
+            lower=None,
+            upper=1.0,
+            note=(
+                f"The same portfolio realized {witness.annualized_volatility:.1%} "
+                f"annualized volatility. Reachable at or above that; below it is "
+                f"unproven rather than impossible."
+            ),
+        ),
+    }
+
+
+def assess(
+    constraints: Constraints,
+    universe: Universe | None = None,
+    include_risk_bounds: bool = False,
+) -> FeasibilityReport:
+    """Feasibility and per-field ranges.
+
+    `include_risk_bounds` is opt-in because it costs a panel load and a backtest
+    — a few hundred milliseconds against microseconds for everything else. The
+    mandate builder calls the cheap form on every keystroke and the expensive one
+    debounced.
+    """
     universe = universe or load_universe()
     problems = find_problems(constraints, universe)
     return FeasibilityReport(
         feasible=not problems,
         problems=problems,
-        ranges=feasible_ranges(constraints, universe),
+        ranges=feasible_ranges(constraints, universe, include_risk_bounds),
     )

@@ -164,22 +164,20 @@ export interface ProgressEvent {
   at: string;
 }
 
-export interface FeasibilityProblem {
-  field: string;
-  message: string;
-}
-
 export interface FieldRange {
-  field: string;
-  min: number | null;
-  max: number | null;
-  reason: string | null;
+  lower: number | null;
+  upper: number | null;
+  /** No freedom left — render a disabled control, not a slider pinned at one value. */
+  locked: boolean;
+  note: string | null;
 }
 
 export interface FeasibilityReport {
   feasible: boolean;
-  problems: FeasibilityProblem[];
-  ranges: FieldRange[];
+  problems: string[];
+  /** Keyed by field path, e.g. "max_holdings" or
+   *  "asset_class_bands.fixed_income.min_weight". */
+  ranges: Record<string, FieldRange>;
 }
 
 class ApiError extends Error {
@@ -217,11 +215,22 @@ export const api = {
 
   listMandates: () => request<MandateOption[]>("/api/mandates"),
 
-  checkFeasibility: (constraints: Constraints) =>
-    request<FeasibilityReport>("/api/constraints/feasibility", {
-      method: "POST",
-      body: JSON.stringify(constraints),
-    }),
+  /**
+   * The whole constraint set is posted, not one field — the fields are
+   * interdependent (raising max_holdings widens the legal max_position_weight,
+   * which widens the reachable asset-class floors), so a per-field check would
+   * report stale bounds.
+   *
+   * `includeRisk` additionally backtests a defensive portfolio to report what
+   * drawdown is demonstrably reachable. Opt-in: it turns a sub-millisecond call
+   * into a few hundred milliseconds, so it is debounced rather than run on every
+   * keystroke.
+   */
+  checkFeasibility: (constraints: Constraints, includeRisk = false) =>
+    request<FeasibilityReport>(
+      `/api/constraints/feasibility?include_risk=${includeRisk}`,
+      { method: "POST", body: JSON.stringify(constraints) },
+    ),
 
   /** The only write route, and the only one requiring a token — a run spends
    *  real money, whereas everything readable here is the demo. */

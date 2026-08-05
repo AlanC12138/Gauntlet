@@ -265,6 +265,56 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+/* --- mandate builder --- */
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem 1.5rem;
+  margin: 1rem 0;
+}
+
+.control label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.control-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.control-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.control input[type="range"] {
+  width: 100%;
+  margin: 0.35rem 0 0.2rem;
+  accent-color: var(--accent);
+}
+
+.control.locked {
+  opacity: 0.6;
+}
+
+.control-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.builder-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

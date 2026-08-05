@@ -30,6 +30,13 @@ def test_auth_config_reports_enabled(auth_on):
     assert auth_on.get("/api/auth").json() == {"enabled": True}
 
 
+def test_an_empty_secret_counts_as_disabled(monkeypatch):
+    """`CLERK_SECRET_KEY=` with no value is "unset", not "enabled with a blank
+    key" — the latter 401s every request with no visible cause."""
+    monkeypatch.setattr(settings, "clerk_secret_key", "")
+    assert settings.auth_enabled is False
+
+
 def test_auth_config_reports_disabled(auth_off):
     # Separate test, not a second assertion above: both fixtures patch the same
     # setting, so requesting them together would leave only the last one applied.

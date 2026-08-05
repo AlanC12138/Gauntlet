@@ -101,7 +101,11 @@ class Settings(BaseSettings):
 
     @property
     def auth_enabled(self) -> bool:
-        return self.clerk_secret_key is not None
+        # Truthiness, not `is not None`: `CLERK_SECRET_KEY=` in a .env or a
+        # blank value exported by a shell yields an empty string, which would
+        # otherwise turn auth *on* with a key that cannot verify anything —
+        # every request 401s and the cause is invisible.
+        return bool(self.clerk_secret_key)
 
     # Browser origins allowed to call this API. Vite's dev server defaults to
     # 5173; 4173 is its preview server. An explicit list, not "*", because

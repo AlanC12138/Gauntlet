@@ -54,6 +54,52 @@ def test_post_accepts_and_returns_an_id(client):
     assert body["run_id"]
 
 
+def test_an_inline_mandate_carries_edited_constraints_through(clean_db, monkeypatch):
+    """What the mandate builder actually posts.
+
+    A preset is sent by key so the server stays its source of truth, but an
+    edited constraint set is sent as a full inline mandate — so the edit has to
+    survive validation and reach the pipeline verbatim, not be silently replaced
+    by the preset it started from.
+    """
+    import uuid
+
+    from gauntlet.db import get_session
+    from gauntlet.db import runs as repo
+    from gauntlet.mandates import get_mandate
+
+    captured = {}
+
+    def fake_enqueue(mandate):
+        captured["mandate"] = mandate
+        run_id = uuid.uuid4().hex
+        with get_session() as session:
+            repo.create_run(session, run_id, mandate)
+        return run_id
+
+    monkeypatch.setattr("gauntlet.jobs.enqueue_run", fake_enqueue)
+
+    base = get_mandate("balanced")
+    edited = base.model_dump(mode="json")
+    edited["constraints"]["max_position_weight"] = 0.05
+    edited["constraints"]["max_holdings"] = 30
+    edited["constraints"]["max_drawdown_tolerance"] = 0.12
+
+    response = TestClient(app).post("/api/runs", json={"mandate": edited})
+
+    assert response.status_code == 202
+    sent = captured["mandate"].constraints
+    assert sent.max_position_weight == 0.05
+    assert sent.max_holdings == 30
+    assert sent.max_drawdown_tolerance == 0.12
+    # And it is persisted, so the run record reflects what was actually run
+    # rather than the preset's defaults.
+    with get_session() as session:
+        record = repo.get_run(session, response.json()["run_id"])
+        stored = record.mandate.payload["constraints"]
+    assert stored["max_position_weight"] == 0.05
+
+
 def test_unknown_mandate_is_404(client):
     response = client.post("/api/runs", json={"mandate_name": "nonexistent"})
     assert response.status_code == 404

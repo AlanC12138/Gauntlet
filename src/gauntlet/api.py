@@ -146,7 +146,9 @@ def list_mandates() -> list[MandateOption]:
 
 
 @app.post("/api/constraints/feasibility", response_model=FeasibilityReport)
-def check_constraint_feasibility(constraints: Constraints) -> FeasibilityReport:
+def check_constraint_feasibility(
+    constraints: Constraints, include_risk: bool = False
+) -> FeasibilityReport:
     """Whether a constraint set is satisfiable, and the legal range of each field.
 
     Backs the Phase 5 mandate builder: a client adjusts a control, the widget
@@ -155,11 +157,15 @@ def check_constraint_feasibility(constraints: Constraints) -> FeasibilityReport:
     are interdependent, so a per-field check would report stale bounds. Cheap
     enough to call on every keystroke: pure arithmetic, no model, no backtest.
 
-    `max_drawdown_tolerance` and `max_volatility` come back with null bounds.
-    They are measured after execution, so deciding reachability means backtesting
-    a candidate portfolio rather than evaluating an inequality — Phase 5.
+    `include_risk` additionally backtests a defensive portfolio to say what
+    drawdown and volatility are *demonstrably* reachable. It stays opt-in because
+    it costs a backtest — milliseconds become hundreds of them — and because the
+    answer it gives is one-directional: a witness proves a target is achievable
+    and never proves one impossible. Those two fields therefore still return null
+    bounds, with the achieved level carried in the note; publishing it as a floor
+    would lock a client out of targets the system actually meets.
     """
-    return assess(constraints)
+    return assess(constraints, include_risk_bounds=include_risk)
 
 
 @app.get("/api/auth", response_model=AuthConfig)

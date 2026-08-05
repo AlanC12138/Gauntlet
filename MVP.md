@@ -24,8 +24,8 @@ A fixed set of ~30-50 liquid US equities and ETFs spanning multiple sectors, wit
 | 2 — Compliance + screening ✅ | Constraint-Compliance Agent (deterministic rules engine) + Screening Agent (RAG-backed) + Synthesis Agent with loop-back authority | This is where the "verify, don't trust" premise actually gets built |
 | 3 — Eval harness ✅ | Two-part: backtest-math correctness vs. known reference calculations; compliance-checker precision/recall vs. labeled violation cases | The quantifiable artifact — and the regression guard for both the backtester and the rules engine |
 | 4 — Persistence ✅ | Postgres (mandates, run history, eval results, ESG corpus, append-only price cache), Redis + RQ job queue for **the agent loop** | App database introduced here, not before. Two plan changes, both measured rather than assumed: the queue runs the whole pipeline (a backtest is 31 ms; the agent loop is 10+ minutes), and Clerk moved to Phase 5 because it is frontend-first — auth with no UI to authenticate against is untestable |
-| **5 — Frontend + auth** (current) | React + Vite: mandate input, live SSE agent-progress view, final memo with Recharts (equity curve, allocation breakdown, drawdown). Clerk auth (single-user scoped). Backtest-derived feasibility bounds for post-execution constraints | |
-| 6 — Polish | Langfuse tracing wired into the full agent loop (including loop-back iterations), README with eval numbers + demo GIF, deploy | |
+| 5 — Frontend + auth ✅ | React + Vite: constraint builder with server-computed range locking, live SSE agent-progress view, final memo with Recharts (equity curve, allocation breakdown, drawdown). Clerk auth gated at cost — reads public, starting a run requires sign-in. Backtest-derived reachability for post-execution constraints, reported as an existence proof rather than a floor | Auth is disabled entirely when no Clerk key is set; that is a supported mode with its own test, so local dev and a public demo run the same code |
+| **6 — Polish** (current) | Langfuse tracing, README with eval numbers + demo GIF, deploy | |
 
 ## Explicit non-goals (for now)
 
