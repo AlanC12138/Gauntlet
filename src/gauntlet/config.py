@@ -86,6 +86,16 @@ class Settings(BaseSettings):
     queue_name: str = "gauntlet"
     job_timeout_seconds: int = 3_600
 
+    # Browser origins allowed to call this API. Vite's dev server defaults to
+    # 5173; 4173 is its preview server. An explicit list, not "*", because
+    # credentialed requests are rejected against a wildcard — which would break
+    # Clerk in a way that only shows up once auth is wired in.
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+    ]
+
     # How many ESG notes to put in the Screening Agent's context.
     screening_top_k: int = 6
     # Bound on the propose -> verify -> govern loop. Without this a Synthesis

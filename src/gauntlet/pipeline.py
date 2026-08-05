@@ -21,6 +21,7 @@ off the request thread.
 """
 
 import logging
+from typing import Protocol
 
 import anthropic
 
@@ -41,12 +42,28 @@ from gauntlet.universe import load_universe
 logger = logging.getLogger(__name__)
 
 
+class EventSink(Protocol):
+    """Where stage events go. A Protocol rather than an import of the Redis
+    publisher, so the loop stays testable — and runnable — with no Redis."""
+
+    def __call__(
+        self, stage: str, status: str, detail: str = "", iteration: int = 0
+    ) -> None: ...
+
+
+def _ignore_events(stage: str, status: str, detail: str = "", iteration: int = 0) -> None:
+    """Default sink. The loop emits unconditionally and this discards it, so
+    progress reporting adds no branching to the control flow being demonstrated."""
+
+
 def run_pipeline(
     mandate: Mandate,
     client: anthropic.Anthropic | None = None,
     retriever: Retriever | None = None,
     max_iterations: int | None = None,
+    on_event: EventSink | None = None,
 ) -> RunReport:
+    emit = on_event or _ignore_events
     universe = load_universe()
     retriever = retriever or BM25Retriever()
     client = client or build_client()
@@ -59,8 +76,15 @@ def run_pipeline(
 
     for index in range(1, limit + 1):
         logger.info("--- Iteration %d/%d ---", index, limit)
+        emit("iteration", "started", f"Iteration {index} of {limit}", index)
 
         logger.info("Allocation Agent: proposing%s", " (revision)" if feedback else "")
+        emit(
+            "allocation",
+            "started",
+            "Revising after feedback" if feedback else "Proposing an allocation",
+            index,
+        )
         try:
             allocation, allocation_usage = propose_allocation(
                 mandate, universe=universe, feedback=feedback, client=client
@@ -70,6 +94,7 @@ def run_pipeline(
             # reaches the assessments — there is nothing coherent to assess — but
             # it consumes an iteration and its tokens are still billed.
             logger.warning("Allocation Agent proposal rejected before assessment: %s", exc)
+            emit("allocation", "rejected", str(exc), index)
             usage.append(exc.usage)
             malformed.append(str(exc))
             feedback = (
@@ -83,6 +108,7 @@ def run_pipeline(
             # ends the loop. Earlier iterations were fully assessed and paid for;
             # returning them unapproved beats discarding them.
             usage.append(exc.usage)
+            emit("allocation", "truncated", str(exc), index)
             if iterations:
                 logger.warning("%s — returning the last completed iteration unapproved", exc)
                 break
@@ -90,6 +116,7 @@ def run_pipeline(
 
         usage.append(allocation_usage)
         logger.info("Allocation Agent: proposed %d positions", len(allocation.positions))
+        emit("allocation", "finished", f"Proposed {len(allocation.positions)} positions", index)
 
         # The three assessments. Screening never sees the others' output, so its
         # agreement is evidence rather than an echo. Compliance is the one
@@ -97,17 +124,51 @@ def run_pipeline(
         # tolerance) are constraints on what the allocation *did*, so the
         # backtest has to run first. That ordering is the point — it is the only
         # constraint a proposer cannot satisfy by reading its own instructions.
+        emit("verification", "started", "Backtesting the proposal", index)
         backtest = verify_allocation(allocation, mandate)
+        emit(
+            "verification",
+            "finished",
+            f"CAGR {backtest.metrics.cagr:.2%}, max drawdown "
+            f"{backtest.metrics.max_drawdown:.2%}",
+            index,
+        )
+
+        emit("compliance", "started", "Checking deterministic rules", index)
         compliance = check_compliance(allocation, mandate, universe=universe, backtest=backtest)
+        emit(
+            "compliance",
+            "finished" if compliance.passed else "violated",
+            "Passed all checks"
+            if compliance.passed
+            else f"{len(compliance.violations)} violation(s): "
+            + ", ".join(v.rule for v in compliance.violations),
+            index,
+        )
+
+        emit("screening", "started", "Screening against the ESG corpus", index)
         screening, screening_usage = screen_allocation(
             allocation, mandate, retriever=retriever, client=client
         )
         usage.append(screening_usage)
+        emit(
+            "screening",
+            "finished" if screening.passed else "flagged",
+            f"{len(screening.findings)} finding(s)",
+            index,
+        )
 
+        emit("synthesis", "started", "Supervisor reviewing all three assessments", index)
         verdict, synthesis_usage = synthesize(
             mandate, allocation, backtest, compliance, screening, iteration=index, client=client
         )
         usage.append(synthesis_usage)
+        emit(
+            "synthesis",
+            "approved" if verdict.decision == "approve" else "revise",
+            verdict.reasoning[:200],
+            index,
+        )
 
         iterations.append(
             Iteration(

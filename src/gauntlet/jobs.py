@@ -55,22 +55,40 @@ def execute_run(run_id: str, mandate_payload: dict) -> str:
     from gauntlet.db import get_session
     from gauntlet.db import runs as repo
     from gauntlet.pipeline import run_pipeline
+    from gauntlet.progress import (
+        STAGE_RUN,
+        STATUS_COMPLETED,
+        STATUS_FAILED,
+        ProgressPublisher,
+    )
 
     mandate = Mandate.model_validate(mandate_payload)
+    emit = ProgressPublisher(run_id)
 
     with get_session() as session:
         repo.mark_running(session, run_id)
+    emit(STAGE_RUN, "started", mandate.name)
 
     try:
-        report = run_pipeline(mandate)
+        report = run_pipeline(mandate, on_event=emit)
     except Exception as exc:
         logger.exception("Run %s failed", run_id)
         with get_session() as session:
             repo.mark_failed(session, run_id, f"{type(exc).__name__}: {exc}")
+        emit(STAGE_RUN, STATUS_FAILED, f"{type(exc).__name__}: {exc}")
         raise
 
     with get_session() as session:
         repo.save_result(session, run_id, report)
+    # Terminal event: this is what closes the browser's stream. It is emitted
+    # after the report is persisted, so a client that reacts by fetching the run
+    # cannot beat the write.
+    emit(
+        STAGE_RUN,
+        STATUS_COMPLETED,
+        f"{'Approved' if report.approved else 'Not approved'} after "
+        f"{len(report.iterations)} iteration(s)",
+    )
 
     logger.info(
         "Run %s complete: approved=%s iterations=%d",

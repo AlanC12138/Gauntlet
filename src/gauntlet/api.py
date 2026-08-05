@@ -13,13 +13,15 @@ import datetime as dt
 import logging
 
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
 
 from gauntlet.db.models import RunRecord
 from gauntlet.db.runs import STATUS_QUEUED
+from gauntlet.config import settings
 from gauntlet.feasibility import FeasibilityReport, assess
 from gauntlet.mandates import DEMO_MANDATES, get_mandate
 from gauntlet.models import Constraints, Mandate, RebalanceFrequency, RunReport
@@ -32,6 +34,19 @@ app = FastAPI(
     title="Gauntlet",
     version="0.1.0",
     description="Multi-agent portfolio construction with execution-based verification.",
+)
+
+
+# The Vite dev server is a different origin from this API, so every browser call
+# is cross-origin. Origins are an explicit allow-list rather than "*" because
+# credentialed requests (Clerk's session cookie) are rejected outright against a
+# wildcard — a setting that appears to work until auth is added.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -107,9 +122,22 @@ def get_universe() -> Universe:
     return load_universe()
 
 
-@app.get("/api/mandates")
-def list_mandates() -> list[Mandate]:
-    return [get_mandate(key) for key in DEMO_MANDATES]
+class MandateOption(BaseModel):
+    """A demo mandate together with the key that selects it.
+
+    The key is what `POST /api/runs` takes, and returning the mandates without it
+    made this endpoint unusable for building a picker: three of the five demo
+    mandates share a `risk_profile`, so a client keying off any other field
+    silently starts the wrong run.
+    """
+
+    key: str
+    mandate: Mandate
+
+
+@app.get("/api/mandates", response_model=list[MandateOption])
+def list_mandates() -> list[MandateOption]:
+    return [MandateOption(key=key, mandate=get_mandate(key)) for key in DEMO_MANDATES]
 
 
 @app.post("/api/constraints/feasibility", response_model=FeasibilityReport)
@@ -156,6 +184,29 @@ def list_runs(limit: int = 50) -> list[RunSummary]:
 
     with get_session() as session:
         return [_summarize(r) for r in repo.list_runs(session, limit=limit)]
+
+
+@app.get("/api/runs/{run_id}/events")
+async def stream_run_events(run_id: str) -> StreamingResponse:
+    """Server-sent events for a run, replaying anything already emitted.
+
+    Deliberately does not 404 on an unknown run: a client that posts a run and
+    connects immediately can arrive before the worker has published anything, and
+    an empty stream that later fills is the correct behaviour there. A genuinely
+    unknown id simply yields nothing and times out on the client's terms.
+    """
+    from gauntlet.progress import event_stream
+
+    return StreamingResponse(
+        event_stream(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Tells nginx not to buffer, which would otherwise hold every event
+            # until the response completed and defeat the entire mechanism.
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/runs/{run_id}", response_model=RunStatus)

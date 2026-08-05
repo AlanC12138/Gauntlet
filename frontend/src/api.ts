@@ -1,0 +1,231 @@
+/**
+ * Typed client for the Gauntlet API.
+ *
+ * The types here mirror the Pydantic models in `src/gauntlet/models.py`. They
+ * are hand-written rather than generated: the surface is small, and a generator
+ * would add a build step to keep in sync for eight interfaces.
+ */
+
+const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+
+export interface Position {
+  ticker: string;
+  weight: number;
+  rationale: string;
+}
+
+export interface Allocation {
+  strategy_summary: string;
+  positions: Position[];
+}
+
+export interface PerformanceMetrics {
+  total_return: number;
+  cagr: number;
+  annualized_volatility: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  max_drawdown: number;
+  calmar_ratio: number;
+  trading_days: number;
+  years: number;
+}
+
+export interface BacktestResult {
+  start: string;
+  end: string;
+  initial_capital: number;
+  final_value: number;
+  rebalance: string;
+  metrics: PerformanceMetrics;
+  calendar_year_returns: Record<string, number>;
+  equity_curve: [string, number][];
+  drawdown_curve: [string, number][];
+}
+
+export interface Violation {
+  rule: string;
+  message: string;
+}
+
+export interface ComplianceReport {
+  passed: boolean;
+  violations: Violation[];
+  checks_run: string[];
+  sector_exposures: Record<string, number>;
+}
+
+export interface ScreeningFinding {
+  ticker: string;
+  concern: string;
+  excerpt: string;
+  doc_id: string;
+  recommend_exclusion: boolean;
+}
+
+export interface ScreeningReport {
+  passed: boolean;
+  findings: ScreeningFinding[];
+  tickers_screened: string[];
+  ungrounded_findings_dropped: number;
+}
+
+export interface SynthesisVerdict {
+  decision: "approve" | "revise";
+  reasoning: string;
+  revision_feedback: string | null;
+  memo: string | null;
+}
+
+export interface Iteration {
+  index: number;
+  allocation: Allocation;
+  backtest: BacktestResult;
+  compliance: ComplianceReport;
+  screening: ScreeningReport;
+  verdict: SynthesisVerdict;
+}
+
+export interface Mandate {
+  name: string;
+  risk_profile: string;
+  objective: string;
+  start: string;
+  end: string;
+  initial_capital: number;
+  rebalance: string;
+  constraints: Constraints;
+}
+
+export interface AssetClassBand {
+  asset_class: string;
+  min_weight: number;
+  max_weight: number;
+}
+
+export interface Constraints {
+  max_position_weight: number;
+  max_sector_weight: number;
+  min_holdings: number;
+  max_holdings: number;
+  excluded_sectors: string[];
+  excluded_tickers: string[];
+  asset_class_bands: AssetClassBand[];
+  max_drawdown_tolerance: number | null;
+  max_volatility: number | null;
+}
+
+/** A demo mandate plus the key `startRun` needs. Three of the five share a
+ *  `risk_profile`, so the key is the only safe identifier. */
+export interface MandateOption {
+  key: string;
+  mandate: Mandate;
+}
+
+export interface RunReport {
+  mandate: Mandate;
+  allocation: Allocation;
+  backtest: BacktestResult;
+  sector_exposures: Record<string, number>;
+  compliance: ComplianceReport;
+  screening: ScreeningReport;
+  verdict: SynthesisVerdict;
+  iterations: Iteration[];
+  malformed_proposals: string[];
+  approved: boolean;
+}
+
+export interface RunSummary {
+  run_id: string;
+  /** Job lifecycle. Distinct from `approved`, which is the verdict — a run can
+   *  complete cleanly and be unapproved, which is the governance loop working. */
+  status: "queued" | "running" | "completed" | "failed";
+  approved: boolean | null;
+  iterations: number | null;
+  cost_usd: number | null;
+  total_tokens: number | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface RunStatus extends RunSummary {
+  error: string | null;
+  report: RunReport | null;
+}
+
+export interface ProgressEvent {
+  run_id: string;
+  seq: number;
+  stage: string;
+  status: string;
+  detail: string;
+  iteration: number;
+  at: string;
+}
+
+export interface FeasibilityProblem {
+  field: string;
+  message: string;
+}
+
+export interface FieldRange {
+  field: string;
+  min: number | null;
+  max: number | null;
+  reason: string | null;
+}
+
+export interface FeasibilityReport {
+  feasible: boolean;
+  problems: FeasibilityProblem[];
+  ranges: FieldRange[];
+}
+
+class ApiError extends Error {
+  // Assigned in the body rather than as a parameter property: the tsconfig sets
+  // `erasableSyntaxOnly`, which rejects syntax that emits runtime code.
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  });
+  if (!response.ok) {
+    // 503 means a store is down and the client should retry; surfacing the
+    // status lets callers distinguish that from a genuine 4xx.
+    const body = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new ApiError(body.detail ?? "Request failed", response.status);
+  }
+  return response.json() as Promise<T>;
+}
+
+export const api = {
+  base: BASE,
+
+  listMandates: () => request<MandateOption[]>("/api/mandates"),
+
+  checkFeasibility: (constraints: Constraints) =>
+    request<FeasibilityReport>("/api/constraints/feasibility", {
+      method: "POST",
+      body: JSON.stringify(constraints),
+    }),
+
+  startRun: (body: { mandate_name?: string; mandate?: Mandate }) =>
+    request<{ run_id: string; status: string }>("/api/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getRun: (runId: string) => request<RunStatus>(`/api/runs/${runId}`),
+
+  listRuns: () => request<RunSummary[]>("/api/runs"),
+};
+
+export { ApiError };

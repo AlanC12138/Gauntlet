@@ -50,7 +50,7 @@ def test_completed_run_persists_the_report_and_its_summary(
     from gauntlet import jobs, pipeline
 
     report = sample_report(approved=True)
-    monkeypatch.setattr(pipeline, "run_pipeline", lambda mandate: report)
+    monkeypatch.setattr(pipeline, "run_pipeline", lambda mandate, **kw: report)
 
     run_id = jobs.enqueue_run(get_mandate("balanced"))
 
@@ -67,7 +67,9 @@ def test_unapproved_run_still_completes(clean_db, fake_queue, monkeypatch, sampl
     with a negative verdict is a success of the governance loop, not a failure."""
     from gauntlet import jobs, pipeline
 
-    monkeypatch.setattr(pipeline, "run_pipeline", lambda mandate: sample_report(approved=False))
+    monkeypatch.setattr(
+        pipeline, "run_pipeline", lambda mandate, **kw: sample_report(approved=False)
+    )
     run_id = jobs.enqueue_run(get_mandate("balanced"))
 
     with get_session() as session:
@@ -82,7 +84,7 @@ def test_failure_is_recorded_and_reraised(clean_db, fake_queue, monkeypatch):
     as failed, so a dead worker and a failed run stay distinguishable."""
     from gauntlet import jobs, pipeline
 
-    def boom(mandate):
+    def boom(mandate, **kw):
         raise RuntimeError("upstream exploded")
 
     monkeypatch.setattr(pipeline, "run_pipeline", boom)
@@ -113,7 +115,7 @@ def test_error_text_is_truncated(clean_db):
 def test_list_runs_is_newest_first(clean_db, fake_queue, monkeypatch, sample_report):
     from gauntlet import jobs, pipeline
 
-    monkeypatch.setattr(pipeline, "run_pipeline", lambda mandate: sample_report())
+    monkeypatch.setattr(pipeline, "run_pipeline", lambda mandate, **kw: sample_report())
     ids = [jobs.enqueue_run(get_mandate("balanced")) for _ in range(3)]
 
     with get_session() as session:

@@ -36,7 +36,9 @@ The queue's original justification did not survive being measured. README and TE
 
 The price cache moved from parquet to Postgres for a reason that only appears once the queue exists: the worker is a separate process, so a file on local disk stops being a shared store. Append-only survived the move and is now better enforced — `ON CONFLICT DO NOTHING` against the `(ticker, date)` primary key is atomic, where the parquet path had to read the whole cache, diff it in Python, and rewrite. The swap is verified lossless: the eval harness reports the same numbers to the last decimal, and both read paths are tested for parity.
 
-Phase 5 (frontend + Clerk auth) is next.
+**Phase 5 in progress — frontend and live progress.** React + Vite with a results dashboard (Recharts), and a live view of the governance loop over server-sent events. Clerk auth is the remaining piece.
+
+The live view is the part worth explaining. The run executes in the worker process while the browser is attached to the API process, so nothing bridges them by default. The worker publishes a stage event per agent to Redis; the API streams them. Two details make it hold up: events are appended to a capped list *as well as* published, so a browser that connects mid-run replays what it missed rather than opening on a blank panel; and publishing failures are swallowed, because losing a paid, minutes-long run over an undeliverable progress notification would be absurd. The report in Postgres is the record — progress is a convenience.
 
 ## Running it
 
@@ -103,7 +105,15 @@ Queued runs need a worker alongside it:
 poetry run gauntlet worker
 ```
 
-`POST /api/runs` returns `202` with a run id; poll `GET /api/runs/{id}` for status and, once complete, the full report. `GET /api/runs` lists recent runs as summaries. Also available: `GET /api/universe`, `GET /api/mandates`, and `POST /api/constraints/feasibility`.
+And the frontend:
+
+```bash
+npm install --prefix frontend && npm run dev --prefix frontend
+```
+
+`POST /api/runs` returns `202` with a run id; `GET /api/runs/{id}/events` streams stage events over SSE until the run ends; `GET /api/runs/{id}` returns status and, once complete, the full report. `GET /api/runs` lists recent runs as summaries. Also available: `GET /api/universe`, `GET /api/mandates`, and `POST /api/constraints/feasibility`.
+
+Infrastructure outages return `503`, not `500` — a down Postgres or Redis is not a bug in the pipeline, and the distinction tells a client to retry rather than file a report. Routes that need no store (`/health`, `/api/universe`, `/api/mandates`) keep serving during one.
 
 Note that `status` and `approved` are separate fields, deliberately. A run that completes with `approved: false` is the governance loop refusing an allocation after three iterations — a successful run with a negative verdict, not a failure.
 

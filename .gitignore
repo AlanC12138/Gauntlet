@@ -13,3 +13,9 @@ data/cache/
 
 # Local run artifacts
 out/
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
