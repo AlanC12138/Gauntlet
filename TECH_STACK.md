@@ -62,25 +62,36 @@ The actual long pole is the **agent loop**: a three-iteration run is 10+ minutes
 
 Worth noting the shape of the mistake: the original rationale was a plausible guess about where time goes in a system that backtests things, written before anything had been measured. It survived two phases because nothing forced a number.
 
-## Auth (Phase 4)
+## Auth (Phase 5)
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Auth | Clerk, scoped to single-user auth (no orgs, no billing) | This is a portfolio piece, not a monetized SaaS — per-user data isolation (each user's mandates/history are their own) is the actual requirement; buying auth still beats hand-rolling it, just without the org/billing surface SQL Copilot needed |
+| Auth | Clerk (`@clerk/react` + `clerk-backend-api`), single-user — no orgs, no billing | Buying auth beats hand-rolling it, without the org/billing surface SQL Copilot needed |
+
+Moved here from Phase 4 during the build: auth is frontend-first, and standing it up with no UI to authenticate against would have meant shipping something untestable.
+
+### The gate is drawn at cost, not at sensitivity
+
+Reads are public — the universe, the demo mandates, and every completed run with its charts, memo, and compliance panels. That *is* the demo, and a sign-up wall in front of it would defeat the point of having one. Only `POST /api/runs` requires sign-in, because only starting a run spends money on Anthropic API calls.
+
+Unsetting `CLERK_SECRET_KEY` disables auth entirely and makes everything public. That is a supported mode with its own test, not a fallback, so local development and a public deployment run the same code path.
+
+**Not built: per-user data isolation.** An earlier version of this table claimed each user's mandates and history are their own. They are not — `runs` has no owner column, and every signed-in user sees every run. That is defensible for a single-user portfolio demo where the run history *is* the exhibit, but it is a real limitation rather than a design subtlety, and it would have to change before this held anyone else's data.
 
 ## Frontend (Phase 5)
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Framework | React + Vite + TypeScript + Tailwind | No SSR marketing/pricing pages needed here (unlike SQL Copilot), so a plain SPA is simpler than pulling in Next.js for a feature it wouldn't use |
-| Charting | Recharts | Equity curves, allocation breakdowns, drawdown charts |
-| Streaming | SSE | Live view of each agent's status as the propose/verify/govern loop runs, including loop-back iterations |
+| Framework | React + Vite + TypeScript | No SSR marketing/pricing pages needed here (unlike SQL Copilot), so a plain SPA is simpler than pulling in Next.js for a feature it wouldn't use |
+| Styling | Hand-written CSS with custom properties | Originally specified as Tailwind. At roughly a dozen components, a utility framework would have added a build-time dependency and a class vocabulary to serve one page; CSS variables give the light/dark theming that was actually needed |
+| Charting | Recharts | Equity curves, drawdown, sector exposure. It is also ~90% of a 590 kB bundle, which wants code-splitting before deploy |
+| Streaming | SSE over `fetch`, not `EventSource` | `EventSource` cannot send headers, which would force a Clerk bearer token into a query string where it lands in access logs. A streaming `fetch` costs a little manual frame parsing and keeps auth in a header |
 
 ## Observability & Eval
 
 | Concern | Choice | Notes |
 |---|---|---|
-| LLM/agent tracing | Langfuse (Cloud, free tier) | Same reasoning as SQL Copilot — purpose-built for tool-call/agent traces, and the Synthesis Agent's loop-back decisions are exactly the kind of control flow worth having full traces of |
+| LLM/agent tracing | Langfuse (Cloud, free tier) — **not yet built**, Phase 6 | Purpose-built for tool-call/agent traces, and the Synthesis Agent's loop-back decisions are exactly the control flow worth full traces of. Partly pre-empted in the meantime: per-agent token/cost accounting is recorded on every run, and stage events are published live over SSE |
 | Eval harness | Two-part: (1) backtest-math correctness vs. known reference calculations, (2) compliance-checker precision/recall vs. labeled violation cases | These are genuinely different correctness problems — the backtester needs numeric correctness, the compliance/screening layer needs classification accuracy — so one eval harness with one number wouldn't be honest about either |
 
 ## Infra

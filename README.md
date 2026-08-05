@@ -15,14 +15,16 @@ See [MVP.md](MVP.md) for scope/phases and [TECH_STACK.md](TECH_STACK.md) for sta
 
 ## Status
 
-**Phases 1–2 built.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 52 instruments across all 11 GICS sectors plus a fixed-income and commodity sleeve, 2013–2025, see [data/README.md](data/README.md).
+**Phases 1–5 built and verified.** 187 tests, ruff clean, TypeScript clean. Remaining: Langfuse tracing, a demo recording, and deployment — see [MVP.md](MVP.md).
+
+**Phases 1–2.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 52 instruments across all 11 GICS sectors plus a fixed-income and commodity sleeve, 2013–2025, see [data/README.md](data/README.md).
 
 Two guarantees are enforced in code rather than requested in a prompt:
 
 - **Screening findings must be grounded.** Every finding has to quote a retrieved document verbatim; excerpts that appear in no retrieved note are dropped before the supervisor sees them. This has caught a live hallucination.
 - **Compliance is binding, screening is advisory.** If the deterministic rules engine reports a violation the verdict is `revise` regardless of what the Synthesis Agent decided — an LLM that can talk past an arithmetic breach makes the rules engine decorative. Screening findings are LLM judgment and *can* be weighed, with justification.
 
-**Phase 3 (eval harness) built.** Two suites, measuring genuinely different kinds of correctness. Run with `poetry run gauntlet eval` — no LLM calls, no tokens.
+**Phase 3 — eval harness.** Two suites, measuring genuinely different kinds of correctness. Run with `poetry run gauntlet eval` — no LLM calls, no tokens.
 
 **Backtest math — 12/12 cases exact, worst deviation 2.8e-11.** Every metric is checked two ways: against hand-derived answers (constant growth compounds exactly; a 120→90 decline is exactly −25%), and against an independent reference implementation that simulates *shares* rather than return algebra — the way a broker statement is produced. Two implementations that share an approach agreeing proves little; two that don't is evidence. Cases run over both synthetic fixtures and 3,270 rows of real cached prices.
 
@@ -30,13 +32,13 @@ Two guarantees are enforced in code rather than requested in a prompt:
 
 The harness paid for itself on its first run by finding a real bug: **Sharpe ratio exploded to ~1e15 on constant-return paths**, because the zero-variance guard tested `std > 0` and floating point returns ~1e-16 rather than 0. A portfolio held entirely in a stable short-duration bond fund would have reported an astronomical Sharpe in its memo.
 
-**Phase 4 (persistence + job queue) built.** Postgres holds mandates, run history, eval results, the ESG corpus, and the append-only price cache; Redis + RQ run the pipeline off the request thread. `POST /api/runs` now returns a run id to poll rather than blocking.
+**Phase 4 — persistence and job queue.** Postgres holds mandates, run history, eval results, the ESG corpus, and the append-only price cache; Redis + RQ run the pipeline off the request thread. `POST /api/runs` now returns a run id to poll rather than blocking.
 
 The queue's original justification did not survive being measured. README and TECH_STACK both said it existed because backtests are compute-heavy; in fact loading the 52-ticker panel takes ~113 ms and backtesting 52 positions over 3,270 days takes ~31 ms. The real long pole is the **agent loop** — 10+ minutes of API latency for a three-iteration run — so the queued unit is the whole run, not the backtest inside it. Both documents are corrected.
 
 The price cache moved from parquet to Postgres for a reason that only appears once the queue exists: the worker is a separate process, so a file on local disk stops being a shared store. Append-only survived the move and is now better enforced — `ON CONFLICT DO NOTHING` against the `(ticker, date)` primary key is atomic, where the parquet path had to read the whole cache, diff it in Python, and rewrite. The swap is verified lossless: the eval harness reports the same numbers to the last decimal, and both read paths are tested for parity.
 
-**Phase 5 built.** React + Vite with a results dashboard (Recharts), a live view of the governance loop over server-sent events, a constraint builder with server-computed range locking, and Clerk auth in a deliberately partial configuration.
+**Phase 5 — frontend, live progress, auth, and constraint feasibility.** React + Vite with a results dashboard (Recharts), a live view of the governance loop over server-sent events, a constraint builder with server-computed range locking, and Clerk auth in a deliberately partial configuration.
 
 **The constraint builder never decides what is legal.** Every bound comes from the API, computed by the same arithmetic the compliance engine uses — because a widget that reimplemented it would drift, which is exactly the failure that shipped an impossible 30% bond floor against an 8% position cap and burned three live iterations before anyone noticed. The whole constraint set is posted on each edit rather than one field, since the fields are interdependent: dropping the position cap from 10% to 5% moves the max-holdings floor from 12 to 20 and halves the reachable asset-class capacity. Controls with no freedom left are disabled, infeasible combinations are named in plain language, and the run button is disabled so no money is spent on an unsatisfiable mandate.
 
@@ -127,12 +129,15 @@ Infrastructure outages return `503`, not `500` — a down Postgres or Redis is n
 
 Note that `status` and `approved` are separate fields, deliberately. A run that completes with `approved: false` is the governance loop refusing an allocation after three iterations — a successful run with a negative verdict, not a failure.
 
-## Architecture (target)
+## Architecture
+
+Everything below is built, except where marked.
 
 ```
-React + Vite ── mandate input form + live agent-progress view (SSE) + results dashboard (Recharts)
+React + Vite ── constraint builder (server-computed range locking)
+        │       + live agent-progress view (SSE) + results dashboard (Recharts)
         │
-        ├── Clerk (auth, single-user scoped — no orgs/billing)
+        ├── Clerk — required only to START a run; all reads are public
         │
 FastAPI ─┬─ Allocation Agent (Claude) — proposes allocation from mandate + portfolio theory
          ├─ Verification Agent — executes backtest against historical price data (custom engine)
@@ -142,17 +147,35 @@ FastAPI ─┬─ Allocation Agent (Claude) — proposes allocation from mandate
          │                                 (concentration limits, sector caps)
          ├─ Synthesis Agent (Claude, supervisor) — combines all outputs, has loop-back authority
          │                                          to Allocation Agent on failure
+         ├─ Feasibility engine — pre-execution bounds by arithmetic; post-execution
+         │                        bounds by backtested witness (existence proof only)
          ├─ Job queue (Redis + RQ) — the whole run executes off the request thread
          │                            (it's 10+ min of LLM latency; the backtest is 31 ms)
+         ├─ Progress bus (Redis pub/sub + capped replay list) → SSE
          └─ Eval harness (backtest-math correctness + compliance precision/recall)
                 │
         Postgres (mandates, run history, eval results, ESG corpus, append-only price cache)
-        yfinance (historical price data) + news/ESG source (RAG corpus for Screening Agent)
+        yfinance (historical price data) + hand-authored ESG corpus (RAG for Screening Agent)
+
+        Not built: Langfuse tracing, per-user data isolation, deployment.
 ```
+
+## Known limitations
+
+Stated plainly, because the premise of this project is not taking claims on faith.
+
+- **The Allocation Agent aims at a target it cannot measure.** It is told a drawdown tolerance but has no tool to compute one, so it optimizes by proxy and the governance loop catches the miss. The fix is a train/test split — a backtest tool over an in-sample window, with compliance verifying on a holdout — which would turn a single structured-output call into a tool-use loop. Established as a gap, not intent.
+- **The model has look-ahead knowledge of the backtest window.** Training data covers 2013–2025, so it knows how these assets performed. There is no clean fix. The defensible framing, used throughout, is that the backtest is a **risk-constraint measurement, not a performance claim** — and the Synthesis prompt treats backtest results as informational only.
+- **Reachability for drawdown and volatility is one-directional.** A backtested witness proves a target is achievable; nothing here proves one is impossible.
+- **No per-user data isolation.** `runs` has no owner column — every signed-in user sees every run.
+- **Survivorship bias in the universe.** Constituents were chosen knowing which companies still exist in 2026; sector labels are current, not point-in-time; there is no ETF look-through. See [data/README.md](data/README.md).
+- **No Langfuse tracing yet.** Per-agent token and cost accounting is recorded, and stage events stream live, but full traces are Phase 6.
+- **~590 kB JS bundle**, almost entirely Recharts. Wants code-splitting before deploy.
+- **No LICENSE file**, and the repo is private. Both need deciding before it goes public — note that flipping a repo public exposes its entire history, not just `HEAD`.
 
 ## Non-goals (v1)
 
 - No real brokerage integration or trade execution — this proposes and verifies, it never places an order
-- No multi-user orgs or billing — single-user auth only
+- No multi-user orgs or billing — single-user auth only, and no per-user data isolation (see limitations above)
 - No live/real-time trading signals — backtests run over historical data on demand
 - No tax-lot optimization or after-tax return modeling
