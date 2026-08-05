@@ -1,4 +1,4 @@
-"""Runtime configuration. No app database in Phase 1 — paths and API keys only."""
+"""Runtime configuration: paths, API keys, model selection, and service URLs."""
 
 from pathlib import Path
 
@@ -65,6 +65,18 @@ class Settings(BaseSettings):
 
     universe_path: Path = DATA_DIR / "universe.json"
     price_cache_path: Path = DATA_DIR / "cache" / "prices.parquet"
+
+    # Ports are non-default (5433/6380, see docker-compose.yml) so the dev stack
+    # cannot collide with a Postgres or Redis already running on the machine.
+    # Overridable as GAUNTLET_DATABASE_URL / GAUNTLET_REDIS_URL.
+    database_url: str = "postgresql+psycopg://gauntlet:gauntlet@localhost:5433/gauntlet"
+    redis_url: str = "redis://localhost:6380/0"
+
+    # Where a queued run's work happens. The queue exists for the *agent loop* —
+    # a three-iteration run is 10+ minutes of LLM latency — not for the backtest,
+    # which is ~30ms on this universe.
+    queue_name: str = "gauntlet"
+    job_timeout_seconds: int = 3_600
 
     # How many ESG notes to put in the Screening Agent's context.
     screening_top_k: int = 6

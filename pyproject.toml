@@ -19,10 +19,16 @@ pydantic-settings = "^2.14"
 fastapi = "^0.141"
 uvicorn = { extras = ["standard"], version = "^0.52" }
 typer = "^0.27"
+sqlalchemy = "^2.0"
+alembic = "^1.19"
+psycopg = {version = "^3.3", extras = ["binary"]}
+redis = "^8.1"
+rq = "^2.10"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3"
 ruff = "^0.8"
+fakeredis = "^2.37"
 
 [tool.poetry.scripts]
 gauntlet = "gauntlet.cli:app"

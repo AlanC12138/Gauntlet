@@ -43,6 +43,42 @@ def fetch(
     typer.echo(f"Cache up to date. {written} new price bars written.")
 
 
+@app.command("import-prices")
+def import_prices(
+    parquet: Annotated[
+        Path | None, typer.Option("--parquet", help="Defaults to the Phase 1–3 cache path")
+    ] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = True,
+) -> None:
+    """Load the legacy parquet price cache into Postgres.
+
+    One-shot, and safe to re-run: inserts are insert-if-absent, so a second run
+    writes nothing. Exists so the 170k bars already fetched in Phases 1–3 do not
+    have to be re-downloaded — and so the store swap is demonstrably lossless.
+    """
+    _configure_logging(verbose)
+    import pandas as pd
+
+    from gauntlet.config import settings
+    from gauntlet.db import get_session
+    from gauntlet.db import prices as repo
+
+    source = parquet or settings.price_cache_path
+    if not source.exists():
+        raise typer.BadParameter(f"no parquet cache at {source}")
+
+    frame = pd.read_parquet(source)
+    with get_session() as session:
+        before = repo.count_bars(session)
+        written = repo.insert_bars(session, frame)
+        after = repo.count_bars(session)
+
+    typer.echo(
+        f"Read {len(frame):,} bars from {source}. "
+        f"Inserted {written:,} ({before:,} -> {after:,} stored)."
+    )
+
+
 @app.command("run")
 def run(
     mandate_name: Annotated[str, typer.Argument(help="Demo mandate key")] = "balanced",
@@ -73,6 +109,57 @@ def run(
         json_out.parent.mkdir(parents=True, exist_ok=True)
         json_out.write_text(report.model_dump_json(indent=2), encoding="utf-8")
         typer.echo(f"\nFull report written to {json_out}")
+
+
+@app.command("import-corpus")
+def import_corpus(
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = True,
+) -> None:
+    """Sync `data/esg_corpus/*.md` into Postgres.
+
+    Upserts by doc_id and removes documents no longer in the directory, so the
+    table always matches what is in git. The files stay the authoring source of
+    truth; this is the read path a worker uses without a checkout.
+    """
+    _configure_logging(verbose)
+    from gauntlet.db import corpus as repo
+    from gauntlet.db import get_session
+    from gauntlet.retrieval import load_corpus_from_files
+
+    documents = load_corpus_from_files()
+    with get_session() as session:
+        written = repo.upsert_documents(session, documents)
+        removed = repo.delete_absent(session, [d.doc_id for d in documents])
+
+    typer.echo(f"Synced {written} document(s); removed {removed} stale.")
+
+
+@app.command("worker")
+def worker(
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = True,
+) -> None:
+    """Run an RQ worker that executes queued pipeline runs."""
+    _configure_logging(verbose)
+    import sys
+
+    from rq import SimpleWorker, Worker
+
+    from gauntlet.config import settings
+    from gauntlet.jobs import get_queue
+
+    queue = get_queue()
+
+    # RQ's default worker forks per job, which does not exist on Windows. The
+    # difference is real, not cosmetic: SimpleWorker runs the job in the worker
+    # process, so a job that hard-crashes takes the worker with it and there is
+    # no per-job timeout enforcement. Acceptable for local development; a
+    # deployment would run the forking worker on Linux.
+    worker_class = SimpleWorker if sys.platform == "win32" else Worker
+    if worker_class is SimpleWorker:
+        typer.echo("Windows detected: using SimpleWorker (no fork, jobs run in-process).")
+
+    typer.echo(f"Listening on queue {settings.queue_name!r} at {settings.redis_url}")
+    worker_class([queue], connection=queue.connection).work()
 
 
 @app.command("eval")

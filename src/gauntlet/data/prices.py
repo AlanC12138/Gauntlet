@@ -1,11 +1,16 @@
-"""Historical price data: yfinance fetch behind an append-only local cache.
+"""Historical price data: yfinance fetch behind an append-only Postgres cache.
 
-The cache is stored in long format — one row per (ticker, date) with the
-timestamp it was fetched — deliberately mirroring the Postgres table this
-becomes in Phase 4:
+Storage is long format — one row per (ticker, date) with the timestamp it was
+fetched:
 
     price_bars(ticker text, date date, adj_close double, fetched_at timestamptz,
                primary key (ticker, date))
+
+Phase 1 wrote exactly this shape into a parquet file, deliberately, so that
+moving to Postgres in Phase 4 would be mechanical rather than a rewrite. The
+public functions here are unchanged across that move; only the store beneath
+them differs. See `gauntlet.db.prices` for why the file had to go — briefly, the
+RQ worker is a separate process, so a local file is no longer a shared store.
 
 Append-only is the point, not an optimization: a bar that has been observed is
 never overwritten, so a backtest run months apart over the same window produces
@@ -20,8 +25,10 @@ import logging
 
 import pandas as pd
 import yfinance as yf
+from sqlalchemy.exc import SQLAlchemyError
 
-from gauntlet.config import settings
+from gauntlet.db import get_session
+from gauntlet.db import prices as repo
 
 logger = logging.getLogger(__name__)
 
@@ -34,51 +41,13 @@ CACHE_COLUMNS = ["ticker", "date", "adj_close", "fetched_at"]
 COVERAGE_SLACK = pd.Timedelta(days=5)
 
 
-def _empty_cache() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "ticker": pd.Series(dtype="string"),
-            "date": pd.Series(dtype="datetime64[ns]"),
-            "adj_close": pd.Series(dtype="float64"),
-            "fetched_at": pd.Series(dtype="datetime64[ns]"),
-        }
-    )
+class PriceStoreUnavailable(RuntimeError):
+    """The price store could not be reached.
 
-
-def read_cache() -> pd.DataFrame:
-    path = settings.price_cache_path
-    if not path.exists():
-        return _empty_cache()
-    return pd.read_parquet(path)
-
-
-def _append_cache(new_rows: pd.DataFrame) -> int:
-    """Append rows whose (ticker, date) is not already cached. Returns rows written."""
-    existing = read_cache()
-    if not existing.empty:
-        seen = set(zip(existing["ticker"], existing["date"], strict=True))
-        mask = [
-            (t, d) not in seen
-            for t, d in zip(new_rows["ticker"], new_rows["date"], strict=True)
-        ]
-        new_rows = new_rows[mask]
-
-    if new_rows.empty:
-        return 0
-
-    combined = pd.concat([existing, new_rows], ignore_index=True)
-    combined = combined.sort_values(["ticker", "date"], ignore_index=True)
-    settings.price_cache_path.parent.mkdir(parents=True, exist_ok=True)
-    combined.to_parquet(settings.price_cache_path, index=False)
-    return len(new_rows)
-
-
-def _cached_coverage() -> dict[str, tuple[pd.Timestamp, pd.Timestamp]]:
-    cache = read_cache()
-    if cache.empty:
-        return {}
-    spans = cache.groupby("ticker")["date"].agg(["min", "max"])
-    return {t: (row["min"], row["max"]) for t, row in spans.iterrows()}
+    A RuntimeError subclass on purpose: callers that already degrade gracefully
+    on a cold cache — the eval harness drops its real-data cases and runs
+    synthetic-only — keep working without knowing a database is involved.
+    """
 
 
 def _download(tickers: list[str], start: dt.date, end: dt.date) -> pd.DataFrame:
@@ -104,16 +73,21 @@ def _download(tickers: list[str], start: dt.date, end: dt.date) -> pd.DataFrame:
 
 
 def ensure_cached(tickers: list[str], start: dt.date, end: dt.date) -> int:
-    """Fetch any tickers whose cached span doesn't cover [start, end]. Returns rows added."""
-    coverage = _cached_coverage()
+    """Fetch any tickers whose stored span doesn't cover [start, end]. Returns rows added."""
     want_start, want_end = pd.Timestamp(start), pd.Timestamp(end)
+
+    try:
+        with get_session() as session:
+            spans = repo.coverage(session, tickers)
+    except SQLAlchemyError as exc:
+        raise PriceStoreUnavailable(f"Cannot reach the price store: {exc}") from exc
 
     missing = [
         t
         for t in tickers
-        if t not in coverage
-        or coverage[t][0] > want_start + COVERAGE_SLACK
-        or coverage[t][1] < want_end - COVERAGE_SLACK
+        if t not in spans
+        or spans[t][0] > want_start + COVERAGE_SLACK
+        or spans[t][1] < want_end - COVERAGE_SLACK
     ]
     if not missing:
         return 0
@@ -128,7 +102,9 @@ def ensure_cached(tickers: list[str], start: dt.date, end: dt.date) -> int:
     )
     long["ticker"] = long["ticker"].astype("string")
     long["fetched_at"] = pd.Timestamp.now()
-    written = _append_cache(long[CACHE_COLUMNS])
+
+    with get_session() as session:
+        written = repo.insert_bars(session, long[CACHE_COLUMNS])
     logger.info("Cached %d new price bars", written)
     return written
 
@@ -141,13 +117,16 @@ def price_panel(tickers: list[str], start: dt.date, end: dt.date) -> pd.DataFram
     the backtest engine relies on that.
     """
     ensure_cached(tickers, start, end)
-    cache = read_cache()
 
-    window = cache[
-        cache["ticker"].isin(tickers)
-        & (cache["date"] >= pd.Timestamp(start))
-        & (cache["date"] <= pd.Timestamp(end))
-    ]
+    try:
+        with get_session() as session:
+            window = repo.read_window(session, tickers, start, end)
+    except SQLAlchemyError as exc:
+        raise PriceStoreUnavailable(f"Cannot reach the price store: {exc}") from exc
+
+    if window.empty:
+        raise RuntimeError(f"No cached prices for {sorted(tickers)} in {start}..{end}")
+
     panel = window.pivot(index="date", columns="ticker", values="adj_close")
 
     absent = sorted(set(tickers) - set(panel.columns))

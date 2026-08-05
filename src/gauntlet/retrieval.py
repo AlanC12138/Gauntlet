@@ -82,6 +82,34 @@ def _parse_front_matter(raw: str, path: Path) -> tuple[dict[str, str], str]:
 
 @functools.lru_cache(maxsize=1)
 def load_corpus() -> list[Document]:
+    """The corpus, preferring the database and falling back to the source files.
+
+    Phase 4 made `esg_documents` the read path so a worker in another process
+    needs no checkout. The file fallback keeps the eval harness and the screening
+    tests runnable with no database — and it logs at WARNING rather than
+    degrading silently, because "which copy did the Screening Agent actually
+    read" is exactly the question you want answered when a finding looks wrong.
+    """
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        from gauntlet.db import corpus as repo
+        from gauntlet.db import get_session
+
+        with get_session() as session:
+            stored = repo.load_documents(session)
+        if stored:
+            logger.debug("Loaded %d ESG documents from Postgres", len(stored))
+            return stored
+        logger.warning("esg_documents is empty; falling back to files. Run: gauntlet import-corpus")
+    except SQLAlchemyError as exc:
+        logger.warning("Corpus store unreachable (%s); reading source files instead", exc)
+
+    return load_corpus_from_files()
+
+
+def load_corpus_from_files() -> list[Document]:
+    """Parse `data/esg_corpus/*.md`. The authoring source of truth."""
     documents: list[Document] = []
     for path in sorted(CORPUS_DIR.glob("*.md")):
         if path.name == "README.md":

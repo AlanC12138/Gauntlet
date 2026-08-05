@@ -30,7 +30,13 @@ Two guarantees are enforced in code rather than requested in a prompt:
 
 The harness paid for itself on its first run by finding a real bug: **Sharpe ratio exploded to ~1e15 on constant-return paths**, because the zero-variance guard tested `std > 0` and floating point returns ~1e-16 rather than 0. A portfolio held entirely in a stable short-duration bond fund would have reported an astronomical Sharpe in its memo.
 
-Phase 4 (persistence + auth) is next.
+**Phase 4 (persistence + job queue) built.** Postgres holds mandates, run history, eval results, the ESG corpus, and the append-only price cache; Redis + RQ run the pipeline off the request thread. `POST /api/runs` now returns a run id to poll rather than blocking.
+
+The queue's original justification did not survive being measured. README and TECH_STACK both said it existed because backtests are compute-heavy; in fact loading the 52-ticker panel takes ~113 ms and backtesting 52 positions over 3,270 days takes ~31 ms. The real long pole is the **agent loop** — 10+ minutes of API latency for a three-iteration run — so the queued unit is the whole run, not the backtest inside it. Both documents are corrected.
+
+The price cache moved from parquet to Postgres for a reason that only appears once the queue exists: the worker is a separate process, so a file on local disk stops being a shared store. Append-only survived the move and is now better enforced — `ON CONFLICT DO NOTHING` against the `(ticker, date)` primary key is atomic, where the parquet path had to read the whole cache, diff it in Python, and rewrite. The swap is verified lossless: the eval harness reports the same numbers to the last decimal, and both read paths are tested for parity.
+
+Phase 5 (frontend + Clerk auth) is next.
 
 ## Running it
 
@@ -39,10 +45,32 @@ poetry install
 cp .env.example .env   # add your ANTHROPIC_API_KEY
 ```
 
-Warm the price cache once — 52 tickers × 3,270 trading days, fetched from yfinance and stored append-only:
+Start Postgres and Redis (non-default ports 5433/6380, so they can't collide with anything already running):
+
+```bash
+docker compose up -d
+```
+
+Create the schema:
+
+```bash
+poetry run alembic upgrade head
+```
+
+Warm the price cache once — 52 tickers × 3,270 trading days, fetched from yfinance and stored append-only — and load the ESG corpus:
 
 ```bash
 poetry run gauntlet fetch
+```
+
+```bash
+poetry run gauntlet import-corpus
+```
+
+Already have the Phase 1–3 parquet cache? Import it instead of re-downloading. It's insert-if-absent, so re-running writes nothing:
+
+```bash
+poetry run gauntlet import-prices
 ```
 
 Propose an allocation and backtest it:
@@ -63,11 +91,21 @@ Run the eval harness (no LLM calls, no tokens spent):
 poetry run gauntlet eval
 ```
 
-Or serve the API (`POST /api/runs`, `GET /api/universe`, `GET /api/mandates`):
+Or serve the API:
 
 ```bash
 poetry run uvicorn gauntlet.api:app --reload
 ```
+
+Queued runs need a worker alongside it:
+
+```bash
+poetry run gauntlet worker
+```
+
+`POST /api/runs` returns `202` with a run id; poll `GET /api/runs/{id}` for status and, once complete, the full report. `GET /api/runs` lists recent runs as summaries. Also available: `GET /api/universe`, `GET /api/mandates`, and `POST /api/constraints/feasibility`.
+
+Note that `status` and `approved` are separate fields, deliberately. A run that completes with `approved: false` is the governance loop refusing an allocation after three iterations — a successful run with a negative verdict, not a failure.
 
 ## Architecture (target)
 
@@ -84,10 +122,11 @@ FastAPI ─┬─ Allocation Agent (Claude) — proposes allocation from mandate
          │                                 (concentration limits, sector caps)
          ├─ Synthesis Agent (Claude, supervisor) — combines all outputs, has loop-back authority
          │                                          to Allocation Agent on failure
-         ├─ Job queue (Redis + RQ) — backtests run async, off the request thread
+         ├─ Job queue (Redis + RQ) — the whole run executes off the request thread
+         │                            (it's 10+ min of LLM latency; the backtest is 31 ms)
          └─ Eval harness (backtest-math correctness + compliance precision/recall)
                 │
-        Postgres (mandates, allocation history, eval results, append-only price cache)
+        Postgres (mandates, run history, eval results, ESG corpus, append-only price cache)
         yfinance (historical price data) + news/ESG source (RAG corpus for Screening Agent)
 ```
 
