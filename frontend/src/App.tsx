@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type MandateOption, type RunSummary } from "./api";
+import { AuthControls, useToken, WhenCanRun } from "./auth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProgressTimeline } from "./components/ProgressTimeline";
 import { Results } from "./components/Results";
@@ -14,6 +15,7 @@ export default function App() {
   const [startError, setStartError] = useState<string | null>(null);
 
   const { events, result, error } = useRunEvents(runId);
+  const { getToken } = useToken();
 
   useEffect(() => {
     api.listMandates().then(setMandates).catch(() => setMandates([]));
@@ -28,16 +30,18 @@ export default function App() {
   async function start() {
     setStartError(null);
     try {
-      const { run_id } = await api.startRun({ mandate_name: selected });
+      const { run_id } = await api.startRun({ mandate_name: selected }, await getToken());
       setRunId(run_id);
     } catch (err) {
-      setStartError(
-        err instanceof ApiError && err.status === 503
-          ? "The job queue or database is unavailable. Is `docker compose up -d` running?"
-          : err instanceof Error
-            ? err.message
-            : String(err),
-      );
+      if (err instanceof ApiError && err.status === 401) {
+        setStartError("Your session expired. Sign in again to start a run.");
+      } else if (err instanceof ApiError && err.status === 503) {
+        setStartError(
+          "The job queue or database is unavailable. Is `docker compose up -d` running?",
+        );
+      } else {
+        setStartError(err instanceof Error ? err.message : String(err));
+      }
     }
   }
 
@@ -46,7 +50,10 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>Gauntlet</h1>
+        <div className="header-row">
+          <h1>Gauntlet</h1>
+          <AuthControls />
+        </div>
         <p className="tagline">
           Multi-agent portfolio construction. An allocation is proposed, then verified
           by execution — backtested, checked against deterministic rules, and screened
@@ -70,10 +77,20 @@ export default function App() {
             </option>
           ))}
         </select>
-        <button onClick={start} disabled={running}>
-          {running ? "Running…" : "Run the gauntlet"}
-        </button>
-        <span className="muted">A run takes 1–3 minutes and costs roughly $0.20.</span>
+        {/* Browsing is open; only starting a run needs an account, because only
+            starting a run spends money. */}
+        <WhenCanRun
+          fallback={
+            <span className="muted">
+              Sign in to start a run — everything below stays open to browse.
+            </span>
+          }
+        >
+          <button onClick={start} disabled={running}>
+            {running ? "Running…" : "Run the gauntlet"}
+          </button>
+          <span className="muted">A run takes 1–3 minutes and costs roughly $0.20.</span>
+        </WhenCanRun>
       </section>
 
       {startError && <p className="error">{startError}</p>}

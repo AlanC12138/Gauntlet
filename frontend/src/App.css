@@ -41,10 +41,29 @@ body {
   padding: 2rem 1.25rem 4rem;
 }
 
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 header h1 {
   margin: 0;
   font-size: 2rem;
   letter-spacing: -0.02em;
+}
+
+.auth-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+button.secondary {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
 }
 
 .tagline {

@@ -36,7 +36,9 @@ The queue's original justification did not survive being measured. README and TE
 
 The price cache moved from parquet to Postgres for a reason that only appears once the queue exists: the worker is a separate process, so a file on local disk stops being a shared store. Append-only survived the move and is now better enforced — `ON CONFLICT DO NOTHING` against the `(ticker, date)` primary key is atomic, where the parquet path had to read the whole cache, diff it in Python, and rewrite. The swap is verified lossless: the eval harness reports the same numbers to the last decimal, and both read paths are tested for parity.
 
-**Phase 5 in progress — frontend and live progress.** React + Vite with a results dashboard (Recharts), and a live view of the governance loop over server-sent events. Clerk auth is the remaining piece.
+**Phase 5 in progress — frontend, live progress, and auth.** React + Vite with a results dashboard (Recharts), a live view of the governance loop over server-sent events, and Clerk auth in a deliberately partial configuration.
+
+**Auth is drawn at cost, not at sensitivity.** Browsing the universe, the demo mandates, and every completed run — charts, memo, compliance and screening panels — needs no account, because that *is* the demo and a sign-up wall in front of it would defeat the point. Only `POST /api/runs` requires sign-in, because only starting a run spends money on Anthropic API calls. Setting no `CLERK_SECRET_KEY` disables auth entirely and makes everything public; that is a supported mode with its own test, not a fallback, so local development and a public deployment run the same code.
 
 The live view is the part worth explaining. The run executes in the worker process while the browser is attached to the API process, so nothing bridges them by default. The worker publishes a stage event per agent to Redis; the API streams them. Two details make it hold up: events are appended to a capped list *as well as* published, so a browser that connects mid-run replays what it missed rather than opening on a blank panel; and publishing failures are swallowed, because losing a paid, minutes-long run over an undeliverable progress notification would be absurd. The report in Postgres is the record — progress is a convenience.
 
@@ -46,6 +48,10 @@ The live view is the part worth explaining. The run executes in the worker proce
 poetry install
 cp .env.example .env   # add your ANTHROPIC_API_KEY
 ```
+
+Optionally add `CLERK_SECRET_KEY` to `.env` and `VITE_CLERK_PUBLISHABLE_KEY` to `frontend/.env.local` to require sign-in before starting a run. Leave both unset to run fully public.
+
+On Windows, write those files with an editor or `Set-Content -Encoding utf8` — PowerShell's `>>` defaults to UTF-16, which the env parser reads as binary and silently ignores.
 
 Start Postgres and Redis (non-default ports 5433/6380, so they can't collide with anything already running):
 

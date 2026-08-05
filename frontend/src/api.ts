@@ -98,7 +98,6 @@ export interface Mandate {
 }
 
 export interface AssetClassBand {
-  asset_class: string;
   min_weight: number;
   max_weight: number;
 }
@@ -110,7 +109,9 @@ export interface Constraints {
   max_holdings: number;
   excluded_sectors: string[];
   excluded_tickers: string[];
-  asset_class_bands: AssetClassBand[];
+  /** Keyed by bucket: "equity" | "fixed_income" | "commodity". A map, not a
+   *  list — the key *is* the bucket name. */
+  asset_class_bands: Record<string, AssetClassBand>;
   max_drawdown_tolerance: number | null;
   max_volatility: number | null;
 }
@@ -192,6 +193,11 @@ class ApiError extends Error {
   }
 }
 
+/** Bearer token for write routes. Null when auth is disabled or signed out. */
+export function authHeader(token: string | null): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
@@ -217,11 +223,16 @@ export const api = {
       body: JSON.stringify(constraints),
     }),
 
-  startRun: (body: { mandate_name?: string; mandate?: Mandate }) =>
+  /** The only write route, and the only one requiring a token — a run spends
+   *  real money, whereas everything readable here is the demo. */
+  startRun: (body: { mandate_name?: string; mandate?: Mandate }, token: string | null) =>
     request<{ run_id: string; status: string }>("/api/runs", {
       method: "POST",
       body: JSON.stringify(body),
+      headers: authHeader(token),
     }),
+
+  authConfig: () => request<{ enabled: boolean }>("/api/auth"),
 
   getRun: (runId: string) => request<RunStatus>(`/api/runs/${runId}`),
 

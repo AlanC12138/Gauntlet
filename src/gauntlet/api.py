@@ -21,6 +21,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gauntlet.db.models import RunRecord
 from gauntlet.db.runs import STATUS_QUEUED
+from gauntlet.auth import CurrentUser
 from gauntlet.config import settings
 from gauntlet.feasibility import FeasibilityReport, assess
 from gauntlet.mandates import DEMO_MANDATES, get_mandate
@@ -74,6 +75,10 @@ class RunRequest(BaseModel):
     mandate_name: str | None = "balanced"
     mandate: Mandate | None = None
     rebalance: RebalanceFrequency | None = None
+
+
+class AuthConfig(BaseModel):
+    enabled: bool
 
 
 class RunAccepted(BaseModel):
@@ -157,10 +162,28 @@ def check_constraint_feasibility(constraints: Constraints) -> FeasibilityReport:
     return assess(constraints)
 
 
+@app.get("/api/auth", response_model=AuthConfig)
+def auth_config() -> AuthConfig:
+    """Whether this deployment requires sign-in to start a run.
+
+    The frontend asks rather than assuming, so a build with no Clerk key
+    configured renders no sign-in affordance at all instead of showing a button
+    that cannot work.
+    """
+    return AuthConfig(enabled=settings.auth_enabled)
+
+
 @app.post("/api/runs", response_model=RunAccepted, status_code=status.HTTP_202_ACCEPTED)
-def create_run(request: RunRequest) -> RunAccepted:
-    """Queue a run. Returns immediately with an id to poll."""
+def create_run(request: RunRequest, user: CurrentUser) -> RunAccepted:
+    """Queue a run. Returns immediately with an id to poll.
+
+    The one write route, and the only one that requires sign-in — a run spends
+    real money on Anthropic API calls, whereas reading the universe, the demo
+    mandates, and completed runs is the demo itself.
+    """
     from gauntlet.jobs import enqueue_run
+
+    logger.info("Run requested by %s", user.user_id or "anonymous")
 
     if request.mandate is not None:
         mandate = request.mandate

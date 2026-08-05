@@ -14,6 +14,19 @@ from gauntlet.db import get_session
 from gauntlet.db import runs as repo
 
 
+@pytest.fixture(autouse=True)
+def _auth_disabled(monkeypatch):
+    """This module tests the run surface, not the gate in front of it.
+
+    Auth is disabled throughout so these assertions describe request/response
+    shapes rather than doubling as authentication tests — `test_auth.py` owns
+    that, and splitting them keeps a 401 from masking a broken 404.
+    """
+    from gauntlet.config import settings
+
+    monkeypatch.setattr(settings, "clerk_secret_key", None)
+
+
 @pytest.fixture
 def client(clean_db, monkeypatch):
     """Enqueue is stubbed to record the run without dispatching to a worker."""

@@ -86,6 +86,23 @@ class Settings(BaseSettings):
     queue_name: str = "gauntlet"
     job_timeout_seconds: int = 3_600
 
+    # Clerk. Both use their own env var names rather than the GAUNTLET_ prefix,
+    # matching Clerk's SDK convention — same reasoning as ANTHROPIC_API_KEY above.
+    #
+    # When the secret key is unset, auth is **disabled** and every route is
+    # public. That is deliberate, not a fallback: it keeps local development and
+    # the public demo runnable without a Clerk account, and makes "is this
+    # protected?" a single explicit condition rather than something scattered
+    # across route decorators.
+    clerk_secret_key: str | None = Field(default=None, validation_alias="CLERK_SECRET_KEY")
+    # Optional PEM public key. With it, token verification is local arithmetic
+    # and never calls Clerk; without it the SDK fetches JWKS and caches per key.
+    clerk_jwt_key: str | None = Field(default=None, validation_alias="CLERK_JWT_KEY")
+
+    @property
+    def auth_enabled(self) -> bool:
+        return self.clerk_secret_key is not None
+
     # Browser origins allowed to call this API. Vite's dev server defaults to
     # 5173; 4173 is its preview server. An explicit list, not "*", because
     # credentialed requests are rejected against a wildcard — which would break
