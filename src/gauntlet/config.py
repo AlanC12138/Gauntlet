@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://gauntlet:gauntlet@localhost:5433/gauntlet"
     redis_url: str = "redis://localhost:6380/0"
 
+    # Seconds to wait for a connection before giving up. Explicit because the
+    # default is *no* timeout: with the database down, `localhost` resolving to
+    # both ::1 and 127.0.0.1 made a single failed connect take 260 seconds while
+    # the OS worked through address families. Every caller that degrades on an
+    # unreachable store — the eval harness, the corpus fallback, the test-suite
+    # skip — was correct but unusable at that latency. Fail fast instead.
+    db_connect_timeout_seconds: int = 5
+
     # Where a queued run's work happens. The queue exists for the *agent loop* —
     # a three-iteration run is 10+ minutes of LLM latency — not for the backtest,
     # which is ~30ms on this universe.

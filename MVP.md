@@ -20,11 +20,11 @@ A fixed set of ~30-50 liquid US equities and ETFs spanning multiple sectors, wit
 
 | Phase | Scope | Notes |
 |---|---|---|
-| **1 — Core agents** (current) | Allocation Agent + Verification Agent (custom backtest engine), hardcoded demo mandate, no persistence, tested via CLI/Postman | Prove the propose → backtest loop works end to end before adding compliance/screening |
-| 2 — Compliance + screening | Constraint-Compliance Agent (deterministic rules engine) + Screening Agent (RAG-backed) + Synthesis Agent with loop-back authority | This is where the "verify, don't trust" premise actually gets built |
-| 3 — Eval harness | Two-part: backtest-math correctness vs. known reference calculations; compliance-checker precision/recall vs. labeled violation cases | The quantifiable artifact — and the regression guard for both the backtester and the rules engine |
-| 4 — Persistence + auth | Postgres (mandates, allocation history, eval results, append-only price cache), Redis + RQ async job queue for backtests, Clerk auth (single-user scoped) | App database introduced here, not before |
-| 5 — Frontend | React + Vite: mandate input, live SSE agent-progress view, final memo with Recharts (equity curve, allocation breakdown, drawdown) | |
+| 1 — Core agents ✅ | Allocation Agent + Verification Agent (custom backtest engine), hardcoded demo mandate, no persistence, tested via CLI/Postman | Prove the propose → backtest loop works end to end before adding compliance/screening |
+| 2 — Compliance + screening ✅ | Constraint-Compliance Agent (deterministic rules engine) + Screening Agent (RAG-backed) + Synthesis Agent with loop-back authority | This is where the "verify, don't trust" premise actually gets built |
+| 3 — Eval harness ✅ | Two-part: backtest-math correctness vs. known reference calculations; compliance-checker precision/recall vs. labeled violation cases | The quantifiable artifact — and the regression guard for both the backtester and the rules engine |
+| 4 — Persistence ✅ | Postgres (mandates, run history, eval results, ESG corpus, append-only price cache), Redis + RQ job queue for **the agent loop** | App database introduced here, not before. Two plan changes, both measured rather than assumed: the queue runs the whole pipeline (a backtest is 31 ms; the agent loop is 10+ minutes), and Clerk moved to Phase 5 because it is frontend-first — auth with no UI to authenticate against is untestable |
+| **5 — Frontend + auth** (current) | React + Vite: mandate input, live SSE agent-progress view, final memo with Recharts (equity curve, allocation breakdown, drawdown). Clerk auth (single-user scoped). Backtest-derived feasibility bounds for post-execution constraints | |
 | 6 — Polish | Langfuse tracing wired into the full agent loop (including loop-back iterations), README with eval numbers + demo GIF, deploy | |
 
 ## Explicit non-goals (for now)
@@ -33,7 +33,7 @@ A fixed set of ~30-50 liquid US equities and ETFs spanning multiple sectors, wit
 - Multi-user orgs or billing — single-user auth only.
 - Live/real-time trading signals — stretch, not MVP.
 - Tax-lot optimization or after-tax return modeling — stretch.
-- Support for asset classes beyond liquid US equities/ETFs (fixed income, derivatives, international) — stretch.
+- Support for asset classes beyond liquid US-listed equities and ETFs — derivatives and international remain a stretch. Fixed income and commodities are **no longer** excluded: the universe carries seven bond funds and a gold ETF, because asset-class bands and a conservative mandate's bond floor are unenforceable without them.
 
 ## Architecture (target, post-Phase 5)
 
@@ -44,12 +44,12 @@ React + Vite ── mandate input + live agent-progress view (SSE) + results das
         │
 FastAPI ─┬─ Allocation Agent (Claude) — proposes weights from mandate
          ├─ Verification Agent — custom backtest engine (pandas/numpy)
-         ├─ Screening Agent (Claude + RAG/pgvector) — qualitative exclusion checks
+         ├─ Screening Agent (Claude + RAG: BM25 + entity linkage) — qualitative exclusions
          ├─ Constraint-Compliance Agent — deterministic rules engine, no LLM
          ├─ Synthesis Agent (Claude, supervisor) — loop-back authority + final memo
-         ├─ Redis + RQ — async backtest job queue
+         ├─ Redis + RQ — job queue for the whole run (not the backtest; see TECH_STACK.md)
          └─ Eval harness (backtest-math correctness + compliance precision/recall)
                 │
-        Postgres (mandates, allocation history, eval results, append-only price cache)
+        Postgres (mandates, run history, eval results, ESG corpus, append-only price cache)
         yfinance (price data) + news/ESG source (RAG corpus)
 ```

@@ -12,9 +12,11 @@ The SSE progress stream arrives in Phase 5, on top of the same run records.
 import datetime as dt
 import logging
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 
 from gauntlet.db.models import RunRecord
 from gauntlet.db.runs import STATUS_QUEUED
@@ -24,12 +26,31 @@ from gauntlet.models import Constraints, Mandate, RebalanceFrequency, RunReport
 from gauntlet.universe import Universe, load_universe
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Gauntlet",
     version="0.1.0",
     description="Multi-agent portfolio construction with execution-based verification.",
 )
+
+
+@app.exception_handler(SQLAlchemyError)
+@app.exception_handler(RedisError)
+def _service_unavailable(request: Request, exc: Exception) -> JSONResponse:
+    """Infrastructure outages are 503, not 500.
+
+    A down Postgres or Redis is not a bug in the pipeline, and the status code
+    should not imply that it is: 503 tells a client to retry, 500 tells it to
+    file a report. Handled app-wide rather than per-endpoint because every route
+    that touches a store has the same failure mode, and the one route that
+    caught it locally was the only one that did.
+    """
+    logger.warning("%s %s failed: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": f"Service unavailable: {type(exc).__name__}"},
+    )
 
 
 class RunRequest(BaseModel):
@@ -124,14 +145,8 @@ def create_run(request: RunRequest) -> RunAccepted:
     if request.rebalance is not None:
         mandate = mandate.model_copy(update={"rebalance": request.rebalance})
 
-    try:
-        run_id = enqueue_run(mandate)
-    except RedisError as exc:
-        raise HTTPException(
-            status_code=503, detail=f"Job queue unavailable: {exc}"
-        ) from exc
-
-    return RunAccepted(run_id=run_id, status=STATUS_QUEUED)
+    # RedisError and SQLAlchemyError are handled app-wide as 503; see above.
+    return RunAccepted(run_id=enqueue_run(mandate), status=STATUS_QUEUED)
 
 
 @app.get("/api/runs", response_model=list[RunSummary])

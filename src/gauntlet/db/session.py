@@ -31,6 +31,11 @@ def get_engine() -> Engine:
             settings.database_url,
             pool_pre_ping=True,
             future=True,
+            # Without this psycopg waits indefinitely. See the note on
+            # `db_connect_timeout_seconds` — a dead database took 260s to report
+            # itself dead, which turned every graceful-degradation path into a
+            # hang.
+            connect_args={"connect_timeout": settings.db_connect_timeout_seconds},
         )
     return _engine
 

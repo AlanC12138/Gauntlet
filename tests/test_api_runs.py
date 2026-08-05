@@ -97,9 +97,15 @@ def test_list_returns_summaries_without_report_bulk(client):
     assert "report" not in body[0]
 
 
-def test_queue_outage_is_503_not_500(clean_db, monkeypatch):
+def test_queue_outage_is_503_not_500(monkeypatch):
     """A down Redis is an infrastructure problem, and the status code should say
-    so — a 500 would read as a bug in the pipeline."""
+    so — a 500 would read as a bug in the pipeline. 503 tells a client to retry;
+    500 tells it to file a report.
+
+    Deliberately does not take `clean_db`: an outage test that needs the very
+    infrastructure it is simulating the loss of would be skipped exactly when it
+    matters most.
+    """
     from redis.exceptions import ConnectionError as RedisConnectionError
 
     def refuse(mandate):
@@ -109,3 +115,49 @@ def test_queue_outage_is_503_not_500(clean_db, monkeypatch):
 
     response = TestClient(app).post("/api/runs", json={"mandate_name": "balanced"})
     assert response.status_code == 503
+
+
+def test_database_outage_is_also_503(monkeypatch):
+    """The same reasoning as Redis, and the case that was actually broken: a down
+    Postgres surfaced as an unhandled 500 until the handler was made app-wide."""
+    from sqlalchemy.exc import OperationalError
+
+    def refuse(mandate):
+        raise OperationalError("select 1", {}, Exception("connection refused"))
+
+    monkeypatch.setattr("gauntlet.jobs.enqueue_run", refuse)
+
+    response = TestClient(app).post("/api/runs", json={"mandate_name": "balanced"})
+    assert response.status_code == 503
+
+
+def test_reads_survive_an_outage_as_503(monkeypatch):
+    """Polling a run during an outage must not look like a missing run — a 404
+    would tell a client the run never existed."""
+    from sqlalchemy.exc import OperationalError
+
+    def refuse(*args, **kwargs):
+        raise OperationalError("select 1", {}, Exception("connection refused"))
+
+    monkeypatch.setattr("gauntlet.db.runs.get_run", refuse)
+    monkeypatch.setattr("gauntlet.db.runs.list_runs", refuse)
+
+    client = TestClient(app)
+    assert client.get("/api/runs/anything").status_code == 503
+    assert client.get("/api/runs").status_code == 503
+
+
+def test_routes_that_need_no_store_still_serve_during_an_outage(monkeypatch):
+    """Health checks and static reference data must not go down with Postgres,
+    or a load balancer will pull a node that is merely degraded."""
+    from sqlalchemy.exc import OperationalError
+
+    def refuse(*args, **kwargs):
+        raise OperationalError("select 1", {}, Exception("connection refused"))
+
+    monkeypatch.setattr("gauntlet.db.runs.list_runs", refuse)
+
+    client = TestClient(app)
+    assert client.get("/health").status_code == 200
+    assert client.get("/api/universe").status_code == 200
+    assert client.get("/api/mandates").status_code == 200

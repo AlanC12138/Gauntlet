@@ -34,7 +34,13 @@ def database():
     from gauntlet.db.session import get_engine, reset_engine
 
     original = settings.database_url
-    admin = create_engine(_admin_url(original), isolation_level="AUTOCOMMIT")
+    admin = create_engine(
+        _admin_url(original),
+        isolation_level="AUTOCOMMIT",
+        # Bounded, or "skip when Postgres is unavailable" becomes "hang for four
+        # minutes, then skip".
+        connect_args={"connect_timeout": settings.db_connect_timeout_seconds},
+    )
     try:
         with admin.connect() as conn:
             exists = conn.execute(

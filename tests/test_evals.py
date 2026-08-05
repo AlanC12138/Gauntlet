@@ -33,10 +33,29 @@ def test_backtest_math_covers_every_metric():
 
 
 def test_backtest_math_includes_real_data():
+    """Guards against synthetic-only quietly becoming the normal path.
+
+    Two failure modes look identical from here and must not be treated alike:
+    an *unreachable* store means the database simply isn't running, which is not
+    a defect and skips; a *reachable but empty* store means the cache is cold,
+    which is a real and fixable problem, and fails.
+    """
+    import pytest
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from gauntlet.db import get_engine
+
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("select 1"))
+    except SQLAlchemyError:
+        pytest.skip("price store unreachable; real-data cases cannot run")
+
     names = {c.name for c in backtest_math.run().cases}
     assert any(n.startswith("real_") for n in names), (
         "real-data cases were skipped — the price cache is probably cold; "
-        "run `gauntlet fetch`"
+        "run `gauntlet fetch` (or `gauntlet import-prices`)"
     )
 
 
