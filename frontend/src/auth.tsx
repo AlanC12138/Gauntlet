@@ -45,7 +45,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   if (!PUBLISHABLE_KEY) return <>{children}</>;
 
   return (
-    <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/">
+    // The redirect URLs are pinned to this app rather than left to Clerk's
+    // dashboard defaults. A development instance otherwise falls back to its
+    // configured home URL — commonly localhost:3000 — so a successful sign-in
+    // lands the user on a dead port and reads as "the app is broken".
+    <ClerkProvider
+      publishableKey={PUBLISHABLE_KEY}
+      afterSignOutUrl="/"
+      signInFallbackRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
+    >
       <ClerkTokenBridge>{children}</ClerkTokenBridge>
     </ClerkProvider>
   );
