@@ -14,6 +14,7 @@ way to tell the difference downstream.
 
 import logging
 import re
+import time
 
 import anthropic
 
@@ -26,6 +27,7 @@ from gauntlet.models import (
     ScreeningReport,
 )
 from gauntlet.retrieval import BM25Retriever, RetrievedDocument, Retriever
+from gauntlet.tracing import record_call
 from gauntlet.usage import LLMUsage, usage_from_response
 
 logger = logging.getLogger(__name__)
@@ -184,14 +186,20 @@ def screen_allocation(
         ", ".join(r.document.doc_id for r in retrieved),
     )
 
+    # Hoisted so the trace records which notes were actually retrieved — the
+    # difference between a missed finding and an absent document.
+    prompt = _build_prompt(mandate, allocation, retrieved)
+
+    started = time.perf_counter()
     response = client.messages.parse(
         model=settings.screening_model_id,
         max_tokens=settings.max_tokens,
         output_config={"effort": settings.effort},
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_prompt(mandate, allocation, retrieved)}],
+        messages=[{"role": "user", "content": prompt}],
         output_format=ScreeningProposal,
     )
+    latency_ms = int((time.perf_counter() - started) * 1000)
 
     if response.stop_reason == "refusal":
         raise RuntimeError(f"Screening Agent request was refused: {response.stop_details}")
@@ -212,4 +220,14 @@ def screen_allocation(
         sum(f.recommend_exclude for f in findings),
         dropped,
     )
-    return report, usage_from_response("Screening Agent", settings.screening_model_id, response)
+    usage = usage_from_response("Screening Agent", settings.screening_model_id, response)
+    record_call(
+        "Screening Agent",
+        settings.screening_model_id,
+        SYSTEM_PROMPT,
+        prompt,
+        response,
+        usage,
+        latency_ms,
+    )
+    return report, usage

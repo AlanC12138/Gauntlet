@@ -15,7 +15,7 @@ See [MVP.md](MVP.md) for scope/phases and [TECH_STACK.md](TECH_STACK.md) for sta
 
 ## Status
 
-**Phases 1–5 built and verified.** 192 tests, ruff clean, TypeScript clean, and every layer driven end to end in a browser — sign-in, the constraint builder, live progress, the loop-back, and custom constraints. Remaining: Langfuse tracing, a demo recording, and deployment — see [MVP.md](MVP.md).
+**Phases 1–6 built and verified.** 201 tests, ruff clean, TypeScript clean, and every layer driven end to end in a browser — sign-in, the constraint builder, live progress, the loop-back, and custom constraints. Remaining: a demo recording, and deployment when you want it ([DEPLOYING.md](DEPLOYING.md)).
 
 **Phases 1–2.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 52 instruments across all 11 GICS sectors plus a fixed-income and commodity sleeve, 2013–2025, see [data/README.md](data/README.md).
 
@@ -157,8 +157,26 @@ FastAPI ─┬─ Allocation Agent (Claude) — proposes allocation from mandate
         Postgres (mandates, run history, eval results, ESG corpus, append-only price cache)
         yfinance (historical price data) + hand-authored ESG corpus (RAG for Screening Agent)
 
-        Not built: Langfuse tracing, per-user data isolation, deployment.
+        Not built: per-user data isolation, deployment.
 ```
+
+**Phase 6 in progress — traces, licence, deployment guide.** Every LLM call is now recorded: prompt, emitted response, model, tokens, cost, latency, and stop reason, keyed to run and iteration. `GET /api/runs/{id}/traces` returns them in the order they happened.
+
+The run report already said *what* each agent decided and the stage events said *when*. Neither said **why** — and that gap was widest at the interesting moment. A loop-back is only explicable if you can read the revision feedback the Allocation Agent was handed, which is now recoverable verbatim:
+
+> *"Compliance FAIL is binding: realized peak-to-trough drawdown of -17.20% breaches the mandate's 15.00% max drawdown tolerance… the drawdown is the only defect, so do not rebuild from scratch."*
+
+This replaces the planned Langfuse integration. At this size a table won: four columns of substance, no vendor account, no SDK, and it keeps the offline posture the rest of the system has — every other component degrades gracefully without network, and tracing shouldn't be the exception. Recording is best-effort and can never fail a run, the same rule the progress bus follows.
+
+It also produced the first per-agent latency data, which finally justifies the queue with numbers rather than assertion. From a real 3-iteration run:
+
+| Agent | Latency per call |
+|---|---|
+| Allocation | 35s / 103s / 63s |
+| Screening | ~2–3s |
+| Synthesis | ~19–21s |
+
+**~269 seconds of LLM latency against a 31 ms backtest.** The proposer is the long pole, and revisions cost more than first attempts — it is being asked to hit a drawdown target it has no tool to measure.
 
 ## Known limitations
 
@@ -169,9 +187,8 @@ Stated plainly, because the premise of this project is not taking claims on fait
 - **Reachability for drawdown and volatility is one-directional.** A backtested witness proves a target is achievable; nothing here proves one is impossible.
 - **No per-user data isolation.** `runs` has no owner column — every signed-in user sees every run.
 - **Survivorship bias in the universe.** Constituents were chosen knowing which companies still exist in 2026; sector labels are current, not point-in-time; there is no ETF look-through. See [data/README.md](data/README.md).
-- **No Langfuse tracing yet.** Per-agent token and cost accounting is recorded, and stage events stream live, but full traces are Phase 6.
-- **~590 kB JS bundle**, almost entirely Recharts. Wants code-splitting before deploy.
-- **No LICENSE file**, and the repo is private. Both need deciding before it goes public — note that flipping a repo public exposes its entire history, not just `HEAD`.
+- **Not deployed, and a public URL would be an open wallet** — every run costs $0.17–$0.40 and nothing rate-limits it. See [DEPLOYING.md](DEPLOYING.md) for what to add first.
+- **The repo is private.** Flipping it public exposes the entire history, not just `HEAD`.
 
 ## Non-goals (v1)
 

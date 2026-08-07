@@ -44,7 +44,7 @@ What actually drives quality at this size is **entity linkage**, not semantic si
 
 | Concern | Choice | Notes |
 |---|---|---|
-| App database | PostgreSQL | Mandates, run history, eval results, and the append-only price cache — introduced Phase 4 |
+| App database | PostgreSQL | Mandates, run history, agent traces, eval results, the ESG corpus, and the append-only price cache — introduced Phase 4 |
 | Job queue | Redis + RQ | Queues the **whole pipeline run**, not the backtest — see below |
 
 ### Correcting the queue rationale
@@ -84,14 +84,14 @@ Unsetting `CLERK_SECRET_KEY` disables auth entirely and makes everything public.
 |---|---|---|
 | Framework | React + Vite + TypeScript | No SSR marketing/pricing pages needed here (unlike SQL Copilot), so a plain SPA is simpler than pulling in Next.js for a feature it wouldn't use |
 | Styling | Hand-written CSS with custom properties | Originally specified as Tailwind. At roughly a dozen components, a utility framework would have added a build-time dependency and a class vocabulary to serve one page; CSS variables give the light/dark theming that was actually needed |
-| Charting | Recharts | Equity curves, drawdown, sector exposure. It is also ~90% of a 590 kB bundle, which wants code-splitting before deploy |
+| Charting | Recharts | Equity curves, drawdown, sector exposure. It is roughly two thirds of the bundle, so the results dashboard is lazy-loaded: 330 kB initial + 392 kB on demand (98 kB gzipped first load) |
 | Streaming | SSE over `fetch`, not `EventSource` | `EventSource` cannot send headers, which would force a Clerk bearer token into a query string where it lands in access logs. A streaming `fetch` costs a little manual frame parsing and keeps auth in a header |
 
 ## Observability & Eval
 
 | Concern | Choice | Notes |
 |---|---|---|
-| LLM/agent tracing | Langfuse (Cloud, free tier) — **not yet built**, Phase 6 | Purpose-built for tool-call/agent traces, and the Synthesis Agent's loop-back decisions are exactly the control flow worth full traces of. Partly pre-empted in the meantime: per-agent token/cost accounting is recorded on every run, and stage events are published live over SSE |
+| LLM/agent tracing | An `agent_calls` table in Postgres, **not** Langfuse | Originally planned as Langfuse. At this size a table won: four columns of substance against a vendor account, an SDK and an egress dependency to read your own prompts — and it keeps the offline posture every other component has. Records prompt, emitted response, model, tokens, cost, latency and stop reason per call, keyed to run and iteration. Best-effort: a trace can never fail a paid run |
 | Eval harness | Two-part: (1) backtest-math correctness vs. known reference calculations, (2) compliance-checker precision/recall vs. labeled violation cases | These are genuinely different correctness problems — the backtester needs numeric correctness, the compliance/screening layer needs classification accuracy — so one eval harness with one number wouldn't be honest about either |
 
 ## Infra

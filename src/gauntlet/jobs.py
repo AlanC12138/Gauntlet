@@ -61,6 +61,7 @@ def execute_run(run_id: str, mandate_payload: dict) -> str:
         STATUS_FAILED,
         ProgressPublisher,
     )
+    from gauntlet.tracing import trace_run
 
     mandate = Mandate.model_validate(mandate_payload)
     emit = ProgressPublisher(run_id)
@@ -70,7 +71,10 @@ def execute_run(run_id: str, mandate_payload: dict) -> str:
     emit(STAGE_RUN, "started", mandate.name)
 
     try:
-        report = run_pipeline(mandate, on_event=emit)
+        # Tracing is enabled only for queued runs: the worker has a run row to
+        # attribute calls to, and a database it already depends on.
+        with trace_run(run_id):
+            report = run_pipeline(mandate, on_event=emit)
     except Exception as exc:
         logger.exception("Run %s failed", run_id)
         with get_session() as session:

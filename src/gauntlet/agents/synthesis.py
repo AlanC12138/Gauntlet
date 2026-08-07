@@ -25,6 +25,7 @@ enforced in code rather than requested in the prompt:
 """
 
 import logging
+import time
 
 import anthropic
 from pydantic import BaseModel
@@ -38,6 +39,7 @@ from gauntlet.models import (
     ScreeningReport,
     SynthesisVerdict,
 )
+from gauntlet.tracing import record_call
 from gauntlet.usage import LLMUsage, usage_from_response
 
 logger = logging.getLogger(__name__)
@@ -172,21 +174,20 @@ def synthesize(
 ) -> tuple[SynthesisVerdict, LLMUsage]:
     client = client or build_client()
 
+    # Hoisted so the trace records the three assessments as the supervisor saw
+    # them — which is what makes an approve-over-a-warning decision reviewable.
+    prompt = _build_prompt(mandate, allocation, backtest, compliance, screening, iteration)
+
+    started = time.perf_counter()
     response = client.messages.parse(
         model=settings.synthesis_model_id,
         max_tokens=settings.max_tokens,
         output_config={"effort": settings.effort},
         system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": _build_prompt(
-                    mandate, allocation, backtest, compliance, screening, iteration
-                ),
-            }
-        ],
+        messages=[{"role": "user", "content": prompt}],
         output_format=SynthesisProposal,
     )
+    latency_ms = int((time.perf_counter() - started) * 1000)
 
     if response.stop_reason == "refusal":
         raise RuntimeError(f"Synthesis Agent request was refused: {response.stop_details}")
@@ -227,4 +228,14 @@ def synthesize(
         raise RuntimeError("Synthesis Agent returned 'revise' with no revision feedback")
 
     logger.info("Synthesis: %s", verdict.decision.upper())
-    return verdict, usage_from_response("Synthesis Agent", settings.synthesis_model_id, response)
+    usage = usage_from_response("Synthesis Agent", settings.synthesis_model_id, response)
+    record_call(
+        "Synthesis Agent",
+        settings.synthesis_model_id,
+        SYSTEM_PROMPT,
+        prompt,
+        response,
+        usage,
+        latency_ms,
+    )
+    return verdict, usage

@@ -7,11 +7,13 @@ nothing here treats its output as trustworthy just because it parsed.
 """
 
 import logging
+import time
 
 import anthropic
 
 from gauntlet.config import build_client, settings
 from gauntlet.models import Allocation, AllocationProposal, Mandate, Position
+from gauntlet.tracing import record_call
 from gauntlet.universe import Universe, load_universe
 from gauntlet.usage import LLMUsage, usage_from_response
 
@@ -185,28 +187,53 @@ def propose_allocation(
     universe = universe or load_universe()
     client = client or build_client()
 
+    # Hoisted so the trace can record exactly what the agent saw. On a revision
+    # this prompt carries the Synthesis Agent's feedback, which is the single
+    # most useful thing to be able to read back after a loop-back.
+    prompt = _build_prompt(mandate, universe, feedback)
+
+    started = time.perf_counter()
     response = client.messages.parse(
         model=settings.allocation_model_id,
         max_tokens=settings.max_tokens,
         output_config={"effort": settings.effort},
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_prompt(mandate, universe, feedback)}],
+        messages=[{"role": "user", "content": prompt}],
         output_format=AllocationProposal,
     )
+    latency_ms = int((time.perf_counter() - started) * 1000)
+
+    def _trace(usage: LLMUsage) -> None:
+        record_call(
+            "Allocation Agent",
+            settings.allocation_model_id,
+            SYSTEM_PROMPT,
+            prompt,
+            response,
+            usage,
+            latency_ms,
+        )
 
     if response.stop_reason == "refusal":
         raise RuntimeError(f"Allocation Agent request was refused: {response.stop_details}")
     if response.stop_reason == "max_tokens":
+        truncated_usage = usage_from_response(
+            "Allocation Agent", settings.allocation_model_id, response
+        )
+        # Traced before raising: a truncation is exactly when reading the partial
+        # response is worth something, and it is billed either way.
+        _trace(truncated_usage)
         raise AllocationTruncatedError(
             "Allocation Agent hit max_tokens before completing its proposal "
             f"({settings.max_tokens}). Lower GAUNTLET_EFFORT or raise "
             "GAUNTLET_MAX_TOKENS.",
-            usage_from_response("Allocation Agent", settings.allocation_model_id, response),
+            truncated_usage,
         )
     if response.parsed_output is None:
         raise RuntimeError(f"Allocation Agent returned unparseable output ({response.stop_reason})")
 
     usage = usage_from_response("Allocation Agent", settings.allocation_model_id, response)
+    _trace(usage)
     logger.info(
         "Allocation Agent: %d in / %d out tokens (~$%s)",
         usage.input_tokens,

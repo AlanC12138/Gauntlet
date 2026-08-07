@@ -118,6 +118,50 @@ class RunRecord(Base):
     __table_args__ = (Index("ix_runs_created_at", "created_at"),)
 
 
+class AgentCall(Base):
+    """One LLM call: what was asked, what came back, and what it cost.
+
+    The run report already records *what* each agent decided. This records *why* —
+    the prompt it saw and the text it produced — which is the one question the
+    stored reports could not answer. A loop-back is only explicable if you can
+    read the feedback the Allocation Agent was given on its second attempt.
+
+    `run_id` is nullable so CLI runs, which create no run row, are still traced.
+
+    Prompts and responses are stored whole rather than truncated. They are a few
+    kilobytes each and roughly eight calls make a run; truncating the middle of a
+    prompt would remove exactly the revision feedback worth reading.
+    """
+
+    __tablename__ = "agent_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id"), nullable=True, index=True
+    )
+    iteration: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    agent: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    response: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Wall clock for the call. The only latency number anywhere: it is what makes
+    # the queue's existence arguable from data rather than assertion.
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stop_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("ix_agent_calls_run_iteration", "run_id", "iteration"),)
+
+
 class EvalRunRecord(Base):
     """A stored `gauntlet eval` execution.
 

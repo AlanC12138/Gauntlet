@@ -82,6 +82,25 @@ class AuthConfig(BaseModel):
     enabled: bool
 
 
+class AgentCallOut(BaseModel):
+    """One traced LLM call. Prompts and responses are returned whole — truncating
+    the middle would remove exactly the revision feedback worth reading."""
+
+    id: int
+    iteration: int
+    agent: str
+    model: str
+    system_prompt: str | None
+    prompt: str
+    response: str | None
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float | None
+    latency_ms: int | None
+    stop_reason: str | None
+    created_at: dt.datetime
+
+
 class RunAccepted(BaseModel):
     run_id: str
     status: str
@@ -214,6 +233,39 @@ def list_runs(limit: int = 50) -> list[RunSummary]:
 
     with get_session() as session:
         return [_summarize(r) for r in repo.list_runs(session, limit=limit)]
+
+
+@app.get("/api/runs/{run_id}/traces", response_model=list[AgentCallOut])
+def get_run_traces(run_id: str) -> list[AgentCallOut]:
+    """Every LLM call made for this run, in the order they happened.
+
+    The run report says what each agent decided; this says what it was asked and
+    what it wrote back. Reading a loop-back means reading the second prompt
+    against the feedback that produced it, which is why these are ordered rather
+    than grouped.
+    """
+    from gauntlet.db import get_session
+    from gauntlet.db import traces as repo
+
+    with get_session() as session:
+        return [
+            AgentCallOut(
+                id=c.id,
+                iteration=c.iteration,
+                agent=c.agent,
+                model=c.model,
+                system_prompt=c.system_prompt,
+                prompt=c.prompt,
+                response=c.response,
+                input_tokens=c.input_tokens,
+                output_tokens=c.output_tokens,
+                cost_usd=c.cost_usd,
+                latency_ms=c.latency_ms,
+                stop_reason=c.stop_reason,
+                created_at=c.created_at,
+            )
+            for c in repo.for_run(session, run_id)
+        ]
 
 
 @app.get("/api/runs/{run_id}/events")

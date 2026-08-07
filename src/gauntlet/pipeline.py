@@ -37,6 +37,7 @@ from gauntlet.agents.verification import verify_allocation
 from gauntlet.config import build_client, settings
 from gauntlet.models import Iteration, Mandate, RunReport
 from gauntlet.retrieval import BM25Retriever, Retriever
+from gauntlet.tracing import set_iteration
 from gauntlet.universe import load_universe
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,11 @@ def run_pipeline(
     for index in range(1, limit + 1):
         logger.info("--- Iteration %d/%d ---", index, limit)
         emit("iteration", "started", f"Iteration {index} of {limit}", index)
+        # Stamps every agent call in this iteration, so a loop-back's two
+        # proposals can be read side by side against the feedback between them.
+        # A plain set rather than a scoped context: the loop is sequential, each
+        # iteration supersedes the last, and `trace_run` unwinds the whole thing.
+        set_iteration(index)
 
         logger.info("Allocation Agent: proposing%s", " (revision)" if feedback else "")
         emit(
