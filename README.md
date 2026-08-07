@@ -99,7 +99,7 @@ Backtest explicit weights without calling the LLM — useful for exercising the 
 poetry run gauntlet backtest '{"SPY": 0.6, "AGG": 0.4}'
 ```
 
-Run the eval harness (no LLM calls, no tokens spent):
+Run the eval harness (no LLM calls, no tokens spent). Results are recorded per suite, so the numbers read as a trend rather than a snapshot — the point of a regression guard is noticing the run where a number moved. Pass `--no-save` to skip, and note persistence is best-effort: a guard that refuses to report because a database is down has made itself the outage.
 
 ```bash
 poetry run gauntlet eval

@@ -168,9 +168,18 @@ def run_evals(
         str | None, typer.Option("--suite", help="backtest | compliance (default: both)")
     ] = None,
     json_out: Annotated[Path | None, typer.Option("--json")] = None,
+    save: Annotated[
+        bool, typer.Option("--save/--no-save", help="Record results in Postgres")
+    ] = True,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
-    """Run the eval harness. No LLM calls, no tokens spent."""
+    """Run the eval harness. No LLM calls, no tokens spent.
+
+    Results are recorded so the harness reads as a trend rather than a snapshot —
+    the point of a regression guard is noticing the run where a number moved.
+    Persistence is best-effort: a guard that refuses to report because a database
+    is down has made itself the outage.
+    """
     _configure_logging(verbose)
     from gauntlet.evals.runner import SUITES, render, run_all
 
@@ -179,6 +188,13 @@ def run_evals(
 
     report = run_all([suite] if suite else None)
     typer.echo(render(report))
+
+    if save:
+        from gauntlet.db.evals import save_report_best_effort
+
+        written = save_report_best_effort(report)
+        if written:
+            typer.echo(f"\nRecorded {written} suite result(s).")
 
     if json_out:
         json_out.parent.mkdir(parents=True, exist_ok=True)
