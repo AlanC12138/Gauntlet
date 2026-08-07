@@ -1,12 +1,20 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { api, ApiError, type Constraints, type MandateOption, type RunSummary } from "./api";
 import { AuthControls, useToken, WhenCanRun } from "./auth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { MandateBuilder } from "./components/MandateBuilder";
 import { ProgressTimeline } from "./components/ProgressTimeline";
-import { Results } from "./components/Results";
 import { useRunEvents } from "./useRunEvents";
 import "./App.css";
+
+// Recharts is roughly two thirds of the bundle, and nothing on the landing page
+// draws a chart — the constraint builder, run history, and live timeline are all
+// plain DOM. Splitting it out means a first visit pays for the app rather than
+// for a charting library it may never reach, and the chunk downloads during the
+// 1-3 minutes a run is already taking.
+const Results = lazy(() =>
+  import("./components/Results").then((m) => ({ default: m.Results })),
+);
 
 export default function App() {
   const [mandates, setMandates] = useState<MandateOption[]>([]);
@@ -133,7 +141,9 @@ export default function App() {
 
       {result?.report && (
         <ErrorBoundary label="The results dashboard">
-          <Results report={result.report} />
+          <Suspense fallback={<p className="muted">Loading charts…</p>}>
+            <Results report={result.report} />
+          </Suspense>
         </ErrorBoundary>
       )}
 
