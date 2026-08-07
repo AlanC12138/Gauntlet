@@ -4,17 +4,17 @@
 
 Give it a mandate — risk profile, constraints, investable universe — and a multi-agent system proposes a portfolio allocation, then actually verifies it: backtests it against real historical data, runs it through a deterministic compliance-rules engine, and screens it for qualitative exclusions via RAG-grounded retrieval. A supervisor agent can reject the proposal and send it back for revision before producing a final investment-committee-style memo.
 
-## Core user flow (target)
+## Core user flow (built)
 
-1. User submits a mandate: risk tolerance, constraints (e.g., max 10% single position, sector caps, ESG exclusions), and an investable universe (or uses a bundled demo universe).
+1. User picks a demo mandate and edits its constraints in a builder whose bounds are computed server-side, so unachievable combinations are locked rather than left to fail at run time.
 2. **Allocation Agent** proposes a set of portfolio weights from the mandate.
-3. In parallel: **Verification Agent** backtests the proposed weights against historical price data (returns, drawdown, volatility, Sharpe); **Constraint-Compliance Agent** deterministically checks the weights against the mandate's numeric/structural rules; **Screening Agent** checks the proposed holdings against qualitative exclusion criteria using RAG-grounded retrieval over ESG/news documents.
+3. Three independent assessments — none reads another's output, which is what makes their agreement evidence rather than an echo. They run **sequentially, in a fixed order**, not in parallel: **Verification Agent** backtests first (returns, drawdown, volatility, Sharpe), because the **Constraint-Compliance Agent** needs those results to check post-execution rules like drawdown tolerance; the **Screening Agent** then checks holdings against qualitative exclusions via RAG-grounded retrieval. That ordering is load-bearing, not incidental — a constraint measured after execution is the one a proposer handed the rules cannot pre-satisfy.
 4. **Synthesis Agent** reviews all three outputs. If compliance or screening fails, it sends the mandate + failure reasons back to the Allocation Agent for a revised proposal (bounded number of iterations). If everything passes, it produces a final memo: allocation, backtest performance, compliance status, and reasoning.
 5. Frontend streams each agent's status live as the loop runs, including any loop-back iterations, then renders the final memo with equity curve and allocation charts.
 
 ## Demo dataset / universe
 
-A fixed set of ~30-50 liquid US equities and ETFs spanning multiple sectors, with cached historical price data — enough to require real portfolio construction (diversification, sector caps) without needing a live brokerage connection.
+52 instruments — 39 US large-cap equities plus 13 ETFs (5 broad/sector equity, 7 fixed income, 1 commodity) — spanning all 11 GICS sectors, over a fixed 2013-01-01 → 2025-12-31 window of 3,270 trading days. Enough to require real portfolio construction (diversification, sector caps, asset-class bands) without a live brokerage connection. Prices are cached append-only in Postgres: 170,040 bars. See [data/README.md](data/README.md).
 
 ## Phases
 
@@ -35,12 +35,14 @@ A fixed set of ~30-50 liquid US equities and ETFs spanning multiple sectors, wit
 - Tax-lot optimization or after-tax return modeling — stretch.
 - Support for asset classes beyond liquid US-listed equities and ETFs — derivatives and international remain a stretch. Fixed income and commodities are **no longer** excluded: the universe carries seven bond funds and a gold ETF, because asset-class bands and a conservative mandate's bond floor are unenforceable without them.
 
-## Architecture (target, post-Phase 5)
+## Architecture (built, as of Phase 5)
 
 ```
-React + Vite ── mandate input + live agent-progress view (SSE) + results dashboard (Recharts)
+React + Vite ── constraint builder (server-locked ranges) + live agent-progress
+        │       view (SSE) + results dashboard (Recharts)
         │
-        ├── Clerk (auth, single-user scoped)
+        ├── Clerk — required only to START a run; all reads public. Off entirely
+        │            when no key is configured
         │
 FastAPI ─┬─ Allocation Agent (Claude) — proposes weights from mandate
          ├─ Verification Agent — custom backtest engine (pandas/numpy)

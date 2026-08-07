@@ -9,9 +9,9 @@
 | Concern | Choice | Notes |
 |---|---|---|
 | Language | Python 3.13+ | Numeric/backtest work (pandas, numpy) and agent orchestration both live comfortably here |
-| Web framework | FastAPI | Async-native — needed for streaming agent progress over SSE and for kicking off async backtest jobs without blocking |
+| Web framework | FastAPI | Async-native — needed for streaming agent progress over SSE and for enqueuing pipeline runs without blocking the request thread (the run, not the backtest — see below) |
 | Dependency management | Poetry | Lock file, clean packaging |
-| ORM | SQLAlchemy 2.0 | Mandates, allocation history, eval results — a fixed, known app schema, unlike SQL Copilot's arbitrary-target-DB reflection use case |
+| ORM | SQLAlchemy 2.0 | Mandates, run history, eval results, the ESG corpus, and the append-only price cache — a fixed, known app schema, unlike SQL Copilot's arbitrary-target-DB reflection use case |
 | Migrations | Alembic | App DB schema versioning from Phase 4 onward |
 
 ## AI / Agent

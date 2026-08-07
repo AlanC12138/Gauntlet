@@ -29,8 +29,24 @@ would be indistinguishable from the internet changing. These documents are
 committed to git, so a screening result is reproducible and any change to it is
 reviewable in a diff.
 
-Phase 4 moves this corpus into pgvector. The `Retriever` protocol in
-`gauntlet/retrieval.py` exists so that swap doesn't touch the Screening Agent.
+Phase 4 moved this corpus into Postgres, but **not** into pgvector — that was the
+original plan and building it out turned into cargo-culting. At eight short notes,
+dense embeddings would add an embedding-provider dependency and a similarity index
+to search a body of text that fits in a single prompt, and would make retrieval
+non-deterministic across provider model updates. That last point is disqualifying,
+because Phase 3 scores screening reproducibility. Retrieval stays lexical: BM25
+over the query text, plus entity linkage on the front-matter tickers, which is
+what actually drives quality at this size.
+
+These files remain the authoring source of truth — they are in git, so a change to
+what the Screening Agent reads shows up in a diff and a review. `gauntlet
+import-corpus` syncs them into the `esg_documents` table, which is the read path a
+worker uses without a checkout. Writes upsert on `doc_id`, unlike the append-only
+price cache: an ESG note is authored text and correcting one is legitimate, where
+a price bar is an observation that must never change.
+
+The `Retriever` protocol in `gauntlet/retrieval.py` remains the swap point if the
+corpus ever outgrows lexical search.
 
 ## Format
 

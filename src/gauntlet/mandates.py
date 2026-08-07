@@ -1,6 +1,11 @@
-"""Hardcoded demo mandates.
+"""The bundled demo mandates.
 
-Phase 1 has no persistence — mandates live here until Postgres arrives in Phase 4.
+These stay in code rather than moving into Postgres, deliberately. They are
+*presets* — the starting points a client edits in the mandate builder — so they
+want to be reviewable in a diff alongside the constraints engine that enforces
+them. Every mandate actually submitted, preset or edited, is persisted to the
+`mandates` table when its run is queued.
+
 Windows default to the universe's verified backtest window.
 """
 

@@ -15,7 +15,7 @@ See [MVP.md](MVP.md) for scope/phases and [TECH_STACK.md](TECH_STACK.md) for sta
 
 ## Status
 
-**Phases 1–5 built and verified.** 187 tests, ruff clean, TypeScript clean. Remaining: Langfuse tracing, a demo recording, and deployment — see [MVP.md](MVP.md).
+**Phases 1–5 built and verified.** 192 tests, ruff clean, TypeScript clean, and every layer driven end to end in a browser — sign-in, the constraint builder, live progress, the loop-back, and custom constraints. Remaining: Langfuse tracing, a demo recording, and deployment — see [MVP.md](MVP.md).
 
 **Phases 1–2.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 52 instruments across all 11 GICS sectors plus a fixed-income and commodity sleeve, 2013–2025, see [data/README.md](data/README.md).
 
@@ -123,7 +123,7 @@ And the frontend:
 npm install --prefix frontend && npm run dev --prefix frontend
 ```
 
-`POST /api/runs` returns `202` with a run id; `GET /api/runs/{id}/events` streams stage events over SSE until the run ends; `GET /api/runs/{id}` returns status and, once complete, the full report. `GET /api/runs` lists recent runs as summaries. Also available: `GET /api/universe`, `GET /api/mandates`, and `POST /api/constraints/feasibility`.
+`POST /api/runs` returns `202` with a run id; `GET /api/runs/{id}/events` streams stage events over SSE until the run ends; `GET /api/runs/{id}` returns status and, once complete, the full report. `GET /api/runs` lists recent runs as summaries. Also available: `GET /health`, `GET /api/universe`, `GET /api/mandates`, `GET /api/auth` (whether sign-in is required), and `POST /api/constraints/feasibility` (add `?include_risk=true` for the backtested reachability bound).
 
 Infrastructure outages return `503`, not `500` — a down Postgres or Redis is not a bug in the pipeline, and the distinction tells a client to retry rather than file a report. Routes that need no store (`/health`, `/api/universe`, `/api/mandates`) keep serving during one.
 

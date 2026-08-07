@@ -6,7 +6,8 @@ scaling — a three-iteration run is 10+ minutes of Anthropic API latency, which
 browser or proxy will hold a connection open for. See `gauntlet.jobs` for why the
 queued unit is the whole run rather than the backtest.
 
-The SSE progress stream arrives in Phase 5, on top of the same run records.
+`GET /api/runs/{id}/events` streams stage events over SSE on top of the same run
+records, so a client can watch the governance loop rather than poll a spinner.
 """
 
 import datetime as dt
