@@ -21,12 +21,15 @@ export function useRunEvents(runId: string | null) {
   const seen = useRef<Set<number>>(new Set());
 
   useEffect(() => {
-    if (!runId) return;
-
+    // Cleared before the early return, not after: navigating back to the
+    // builder sets runId to null, and leaving the previous run's report in
+    // state would render a stale result beside a fresh constraint set.
     setEvents([]);
     setResult(null);
     setError(null);
     seen.current = new Set();
+
+    if (!runId) return;
 
     const controller = new AbortController();
 

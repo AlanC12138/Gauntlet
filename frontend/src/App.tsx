@@ -92,6 +92,15 @@ export default function App() {
       {startError && <p className="error">{startError}</p>}
       {error && <p className="error">Lost the progress stream: {error}</p>}
 
+      {/* Once a run is selected the builder is replaced by its progress and
+          results, so without this there is no way back to it short of reloading
+          the page — and the run history disappears with it. */}
+      {runId && !running && (
+        <button className="secondary" onClick={() => setRunId(null)}>
+          ← Back to constraints
+        </button>
+      )}
+
       {/* Browsing is open; only starting a run needs an account, because only
           starting a run spends money. */}
       {selectedMandate && !runId && (
