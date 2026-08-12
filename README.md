@@ -105,7 +105,8 @@ Run the eval harness (no LLM calls, no tokens spent). Results are recorded per s
 poetry run gauntlet eval
 ```
 
-Or serve the API:
+Or serve the whole thing. **Three terminals** — each of these blocks, so they each need their own:
+
 
 ```bash
 poetry run uvicorn gauntlet.api:app --reload

@@ -42,10 +42,20 @@ table stakes; a governance loop that fires is not.
 
 ## Setup
 
+**Three terminals.** `docker compose up -d` is detached, so it returns
+immediately and can go in any of them first — the other three each block.
+
 ```
+# once, in any terminal (skip if the containers are already up)
 docker compose up -d
+
+# terminal 1
 poetry run uvicorn gauntlet.api:app --port 8000
+
+# terminal 2 — without this, runs sit at "queued" forever
 poetry run gauntlet worker
+
+# terminal 3
 npm run dev --prefix frontend
 ```
 
