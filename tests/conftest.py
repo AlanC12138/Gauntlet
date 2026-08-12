@@ -55,6 +55,11 @@ def database():
 
     settings.database_url = f"{original.rpartition('/')[0]}/{TEST_DB}"
     reset_engine()
+    # drop_all before create_all: the database persists between sessions, and
+    # create_all silently no-ops on an existing table. Without the drop, a schema
+    # change never reaches the test database and every test using the new column
+    # fails with UndefinedColumn — which is exactly what happened.
+    Base.metadata.drop_all(get_engine())
     Base.metadata.create_all(get_engine())
 
     yield get_engine()

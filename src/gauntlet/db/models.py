@@ -112,6 +112,13 @@ class RunRecord(Base):
     finished_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Soft delete. Archived runs stay queryable by id but drop out of listings,
+    # which is what "hide this from the demo" actually wants — a run cost real
+    # money and destroying it to tidy a list is a poor trade. Hard deletion is a
+    # separate, explicit operation.
+    archived_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     mandate: Mapped[MandateRecord | None] = relationship(back_populates="runs")
 

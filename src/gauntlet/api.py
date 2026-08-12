@@ -227,12 +227,20 @@ def create_run(request: RunRequest, user: CurrentUser) -> RunAccepted:
 
 
 @app.get("/api/runs", response_model=list[RunSummary])
-def list_runs(limit: int = 50) -> list[RunSummary]:
+def list_runs(limit: int = 50, include_archived: bool = False) -> list[RunSummary]:
+    """Recent runs. Archived ones are hidden — that is what archiving is for.
+
+    An archived run is still readable at `GET /api/runs/{id}`; only the listing
+    changes, so a link to one keeps working.
+    """
     from gauntlet.db import get_session
     from gauntlet.db import runs as repo
 
     with get_session() as session:
-        return [_summarize(r) for r in repo.list_runs(session, limit=limit)]
+        return [
+            _summarize(r)
+            for r in repo.list_runs(session, limit=limit, include_archived=include_archived)
+        ]
 
 
 @app.get("/api/runs/{run_id}/traces", response_model=list[AgentCallOut])

@@ -134,6 +134,108 @@ def import_corpus(
     typer.echo(f"Synced {written} document(s); removed {removed} stale.")
 
 
+runs_app = typer.Typer(help="Inspect and tidy stored runs.")
+app.add_typer(runs_app, name="runs")
+
+
+def _fmt_run(r) -> str:
+    verdict = "—" if r.approved is None else ("approved" if r.approved else "NOT approved")
+    cost = "—" if r.cost_usd is None else f"${r.cost_usd:.4f}"
+    flag = "  [archived]" if r.archived_at else ""
+    return (
+        f"{r.id[:8]}  {r.created_at:%Y-%m-%d %H:%M}  {r.status:<10} "
+        f"{verdict:<12} iters={r.iterations or '—'}  {cost}{flag}"
+    )
+
+
+def _resolve(session, prefix: str):
+    """Accept an id prefix, the way git accepts a short SHA.
+
+    Refuses an ambiguous prefix rather than picking one — silently archiving the
+    wrong run would be discovered late and be annoying to undo.
+    """
+    from gauntlet.db import runs as repo
+
+    matches = [r for r in repo.list_runs(session, limit=500, include_archived=True)
+               if r.id.startswith(prefix)]
+    if not matches:
+        raise typer.BadParameter(f"no run matching {prefix!r}")
+    if len(matches) > 1:
+        ids = ", ".join(m.id[:12] for m in matches)
+        raise typer.BadParameter(f"{prefix!r} is ambiguous: {ids}")
+    return matches[0]
+
+
+@runs_app.command("list")
+def runs_list(
+    limit: Annotated[int, typer.Option("--limit")] = 20,
+    archived: Annotated[bool, typer.Option("--archived/--no-archived",
+                                           help="Include archived runs")] = False,
+) -> None:
+    """List stored runs, newest first."""
+    from gauntlet.db import get_session
+    from gauntlet.db import runs as repo
+
+    with get_session() as session:
+        rows = repo.list_runs(session, limit=limit, include_archived=archived)
+        if not rows:
+            typer.echo("No runs.")
+            return
+        for r in rows:
+            typer.echo(_fmt_run(r))
+
+
+@runs_app.command("archive")
+def runs_archive(run_id: Annotated[str, typer.Argument(help="Run id or unique prefix")]) -> None:
+    """Hide a run from listings. Reversible, and destroys nothing."""
+    from gauntlet.db import get_session
+    from gauntlet.db import runs as repo
+
+    with get_session() as session:
+        record = _resolve(session, run_id)
+        repo.archive(session, record.id)
+        typer.echo(f"Archived {record.id[:8]} — still fetchable by id; `runs unarchive` to undo.")
+
+
+@runs_app.command("unarchive")
+def runs_unarchive(run_id: Annotated[str, typer.Argument(help="Run id or unique prefix")]) -> None:
+    """Return an archived run to the listings."""
+    from gauntlet.db import get_session
+    from gauntlet.db import runs as repo
+
+    with get_session() as session:
+        record = _resolve(session, run_id)
+        repo.unarchive(session, record.id)
+        typer.echo(f"Unarchived {record.id[:8]}.")
+
+
+@runs_app.command("purge")
+def runs_purge(
+    run_id: Annotated[str, typer.Argument(help="Run id or unique prefix")],
+    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt")] = False,
+) -> None:
+    """Delete a run permanently, with its traces and its mandate.
+
+    Prefer `archive` — this is irreversible, and the run cost real money. The
+    report, every stored prompt and response, and the mandate that produced it
+    all go.
+    """
+    from gauntlet.db import get_session
+    from gauntlet.db import runs as repo
+    from gauntlet.db import traces as trace_repo
+
+    with get_session() as session:
+        record = _resolve(session, run_id)
+        calls = len(trace_repo.for_run(session, record.id))
+        typer.echo(_fmt_run(record))
+        typer.echo(f"  {calls} traced call(s) and its mandate will also be deleted.")
+        if not yes and not typer.confirm("Permanently delete this run?"):
+            typer.echo("Aborted.")
+            raise typer.Exit(code=1)
+        repo.purge(session, record.id)
+        typer.echo(f"Purged {record.id[:8]}.")
+
+
 @app.command("worker")
 def worker(
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = True,

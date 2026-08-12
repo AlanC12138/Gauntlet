@@ -14,7 +14,7 @@ indistinguishable in the database.
 
 import datetime as dt
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from gauntlet.db.models import MandateRecord, RunRecord
@@ -75,6 +75,69 @@ def get_run(session: Session, run_id: str) -> RunRecord | None:
     return session.get(RunRecord, run_id)
 
 
-def list_runs(session: Session, limit: int = 50) -> list[RunRecord]:
-    stmt = select(RunRecord).order_by(RunRecord.created_at.desc()).limit(limit)
+def list_runs(
+    session: Session, limit: int = 50, include_archived: bool = False
+) -> list[RunRecord]:
+    """Recent runs, newest first. Archived ones are hidden unless asked for."""
+    stmt = select(RunRecord)
+    if not include_archived:
+        stmt = stmt.where(RunRecord.archived_at.is_(None))
+    stmt = stmt.order_by(RunRecord.created_at.desc()).limit(limit)
     return list(session.execute(stmt).scalars())
+
+
+def archive(session: Session, run_id: str) -> bool:
+    """Hide a run from listings without destroying it.
+
+    The default way to tidy the demo history: a run cost real money and several
+    minutes, and it stays fetchable by id — only the listing changes.
+    """
+    record = session.get(RunRecord, run_id)
+    if record is None:
+        return False
+    record.archived_at = dt.datetime.now(dt.UTC)
+    return True
+
+
+def unarchive(session: Session, run_id: str) -> bool:
+    record = session.get(RunRecord, run_id)
+    if record is None:
+        return False
+    record.archived_at = None
+    return True
+
+
+def purge(session: Session, run_id: str) -> bool:
+    """Delete a run permanently, with the rows that only exist because of it.
+
+    Order matters and is not obvious. `agent_calls.run_id` references the run, so
+    the traces go first or the delete is rejected. The mandate goes *after*,
+    because `runs.mandate_id` points at it — and only if no other run shares it,
+    since a mandate row is created per submission but that is a convention rather
+    than a guarantee.
+
+    Prices, the ESG corpus and eval results are untouched: none of them belong to
+    a run.
+    """
+    from gauntlet.db.models import AgentCall, MandateRecord
+
+    record = session.get(RunRecord, run_id)
+    if record is None:
+        return False
+
+    mandate_id = record.mandate_id
+    session.execute(delete(AgentCall).where(AgentCall.run_id == run_id))
+    session.delete(record)
+    session.flush()
+
+    if mandate_id is not None:
+        others = session.execute(
+            select(func.count())
+            .select_from(RunRecord)
+            .where(RunRecord.mandate_id == mandate_id)
+        ).scalar_one()
+        if others == 0:
+            mandate = session.get(MandateRecord, mandate_id)
+            if mandate is not None:
+                session.delete(mandate)
+    return True

@@ -99,6 +99,20 @@ Backtest explicit weights without calling the LLM — useful for exercising the 
 poetry run gauntlet backtest '{"SPY": 0.6, "AGG": 0.4}'
 ```
 
+Tidy the stored run history — useful before recording a demo:
+
+```bash
+poetry run gauntlet runs list
+```
+
+```bash
+poetry run gauntlet runs archive 9c3b8fb5
+```
+
+`archive` is a soft delete: the run drops out of listings and out of the frontend's history, but stays readable at `GET /api/runs/{id}`, so an existing link keeps working — and `runs unarchive` puts it back. Ids can be given as a unique prefix, like a short git SHA; an ambiguous one is refused rather than guessed at.
+
+`runs purge <id>` deletes permanently and prompts first. It removes the run, its traced calls, and its mandate — in that order, because `agent_calls.run_id` references the run and `runs.mandate_id` references the mandate. A mandate shared with another run is kept. Prefer `archive`: a run cost real money and several minutes, and destroying one to tidy a list is a poor trade.
+
 Run the eval harness (no LLM calls, no tokens spent). Results are recorded per suite, so the numbers read as a trend rather than a snapshot — the point of a regression guard is noticing the run where a number moved. Pass `--no-save` to skip, and note persistence is best-effort: a guard that refuses to report because a database is down has made itself the outage.
 
 ```bash
