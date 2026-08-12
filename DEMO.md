@@ -31,7 +31,7 @@ table stakes; a governance loop that fires is not.
 | 1 | Landing page, run history | "Five agents. An allocation is proposed, then verified by execution — nothing is taken on faith." |
 | 2 | Drag **Max position weight** 10% → 5% | "Every bound here is computed server-side by the same engine that enforces it. Watch the other controls move." |
 | 3 | Keep dragging to ~1.5% — max-holdings greys out, problems list, Run disables | "Unachievable combinations lock rather than failing at run time. It refuses to spend money on an impossible mandate." |
-| 4 | Reset, pick **Conservative Income**, hit Run | "This one has a 15% drawdown tolerance — a constraint you cannot check until after you have backtested." |
+| 4 | Reset, pick **Conservative Income** — *not* Balanced Growth — and hit Run | "This one has a 15% drawdown tolerance — a constraint you cannot check until after you have backtested." |
 | 5 | Live timeline streaming | "Server-sent events. Allocation proposes, verification backtests, compliance checks, screening reads the ESG corpus, the supervisor decides." |
 | 6 | **Cut** to stored run `9c3b8fb5` | — |
 | 7 | Timeline showing **"Iteration 2 ← sent back for revision"** | "Drawdown came in at 17.8% against a 15% tolerance. Compliance is deterministic and binding — the supervisor cannot approve over it." |
@@ -86,5 +86,11 @@ under ~10 MB or GitHub will be slow to render it; 12–15 fps is plenty for UI.
   that better than a voiceover can.
 - **Do not show a passing run first.** A run approved on iteration 1 looks
   identical to a system with no governance at all.
+- **Do not "revert to the standard mandate" before running.** Balanced Growth at
+  its defaults approves on the first attempt every time — this has already eaten
+  one recording. Conservative Income is the mandate whose 15% drawdown tolerance
+  the proposer reliably misses, which is what makes the loop fire on camera.
+- **Do not record the sign-in.** Dead time, and it says nothing about the system.
+  Log in before you hit record.
 - **Do not speed up the trace section.** It is the only part that cannot be
   inferred from a screenshot.
