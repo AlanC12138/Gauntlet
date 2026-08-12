@@ -4,6 +4,7 @@ import { AuthControls, useToken, WhenCanRun } from "./auth";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { MandateBuilder } from "./components/MandateBuilder";
 import { ProgressTimeline } from "./components/ProgressTimeline";
+import { TracePanel } from "./components/TracePanel";
 import { useRunEvents } from "./useRunEvents";
 import "./App.css";
 
@@ -144,6 +145,12 @@ export default function App() {
           <Suspense fallback={<p className="muted">Loading charts…</p>}>
             <Results report={result.report} />
           </Suspense>
+        </ErrorBoundary>
+      )}
+
+      {result?.report && runId && (
+        <ErrorBoundary label="The agent traces">
+          <TracePanel runId={runId} />
         </ErrorBoundary>
       )}
 

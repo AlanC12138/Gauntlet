@@ -373,3 +373,84 @@ cite {
   font-size: 0.8rem;
   opacity: 0.8;
 }
+
+/* --- agent traces --- */
+.trace-toggle,
+.trace-head {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.trace-toggle {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.trace-iteration h4 {
+  margin: 0.9rem 0 0.3rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.trace-iteration ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 2px solid var(--line);
+}
+
+.trace-call {
+  padding: 0.25rem 0 0.25rem 0.9rem;
+}
+
+.trace-head {
+  display: grid;
+  grid-template-columns: 1.2rem 12rem 1fr;
+  gap: 0.5rem;
+  width: 100%;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+
+.trace-caret {
+  color: var(--muted);
+}
+.trace-agent {
+  font-weight: 600;
+}
+.trace-meta {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.trace-body h5 {
+  margin: 0.6rem 0 0.25rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.trace-body pre {
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  /* Prompts are thousands of characters; wrap and cap the height so the panel
+     stays readable rather than pushing the page kilometres long. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}

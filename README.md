@@ -160,7 +160,7 @@ FastAPI ─┬─ Allocation Agent (Claude) — proposes allocation from mandate
         Not built: per-user data isolation, deployment.
 ```
 
-**Phase 6 in progress — traces, licence, deployment guide.** Every LLM call is now recorded: prompt, emitted response, model, tokens, cost, latency, and stop reason, keyed to run and iteration. `GET /api/runs/{id}/traces` returns them in the order they happened.
+**Phase 6 in progress — traces, licence, deployment guide.** Every LLM call is now recorded: prompt, emitted response, model, tokens, cost, latency, and stop reason, keyed to run and iteration. `GET /api/runs/{id}/traces` returns them in the order they happened, and the results dashboard has an **Agent traces** panel that shows them grouped by iteration.
 
 The run report already said *what* each agent decided and the stage events said *when*. Neither said **why** — and that gap was widest at the interesting moment. A loop-back is only explicable if you can read the revision feedback the Allocation Agent was handed, which is now recoverable verbatim:
 

@@ -154,6 +154,24 @@ export interface RunStatus extends RunSummary {
   report: RunReport | null;
 }
 
+/** One traced LLM call. The run report says what an agent decided; this says
+ *  what it was asked and what it emitted. */
+export interface AgentCall {
+  id: number;
+  iteration: number;
+  agent: string;
+  model: string;
+  system_prompt: string | null;
+  prompt: string;
+  response: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number | null;
+  latency_ms: number | null;
+  stop_reason: string | null;
+  created_at: string;
+}
+
 export interface ProgressEvent {
   run_id: string;
   seq: number;
@@ -246,6 +264,10 @@ export const api = {
   getRun: (runId: string) => request<RunStatus>(`/api/runs/${runId}`),
 
   listRuns: () => request<RunSummary[]>("/api/runs"),
+
+  /** Every LLM call for a run, in the order they happened. Public like the rest
+   *  of the reads — the traces are the most interesting thing to show. */
+  getTraces: (runId: string) => request<AgentCall[]>(`/api/runs/${runId}/traces`),
 };
 
 export { ApiError };

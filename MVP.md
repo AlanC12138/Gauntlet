@@ -26,7 +26,7 @@ Give it a mandate — risk profile, constraints, investable universe — and a m
 | 4 — Persistence ✅ | Postgres (mandates, run history, eval results, ESG corpus, append-only price cache), Redis + RQ job queue for **the agent loop** | App database introduced here, not before. Two plan changes, both measured rather than assumed: the queue runs the whole pipeline (a backtest is 31 ms; the agent loop is 10+ minutes), and Clerk moved to Phase 5 because it is frontend-first — auth with no UI to authenticate against is untestable |
 | 5 — Frontend + auth ✅ | React + Vite: constraint builder with server-computed range locking, live SSE agent-progress view, final memo with Recharts (equity curve, allocation breakdown, drawdown). Clerk auth gated at cost — reads public, starting a run requires sign-in. Backtest-derived reachability for post-execution constraints, reported as an existence proof rather than a floor | Auth is disabled entirely when no Clerk key is set; that is a supported mode with its own test, so local dev and a public demo run the same code |
 | 6 — Polish ✅ | Per-call agent traces in Postgres, MIT licence, bundle code-splitting, deployment guide | Langfuse was dropped for a table — see TECH_STACK. Deployment is documented but deliberately not executed: every run costs $0.17–$0.40 and nothing rate-limits it yet |
-| **7 — Demo** (current) | Recorded walkthrough of a loop-back run; optional deploy once run spend is capped | |
+| **7 — Demo** (current) | Recorded walkthrough of a loop-back run; optional deploy once run spend is capped | Shot list in [DEMO.md](DEMO.md). Traces are now surfaced in the UI so the revision feedback is showable rather than curl-only — that panel is the payoff shot |
 
 ## Explicit non-goals (for now)
 
