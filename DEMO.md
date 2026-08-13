@@ -75,7 +75,20 @@ If those have been cleared, regenerate the first with `Conservative Income`
 unedited — it is the mandate whose drawdown tolerance the proposer reliably
 misses on the first attempt.
 
-## Where the file goes
+## Where the file went
+
+**Published:** https://youtu.be/_kiVVxvbi_4 — embedded in the README as a clickable
+thumbnail (`img.youtube.com/vi/<id>/maxresdefault.jpg`).
+
+Hosted externally rather than committed, for two reasons: GitHub caps video
+attachments at **10 MB on a free plan** (100 MB is the paid figure), and a 54 MB
+file committed to git is in the history permanently — which matters more given
+the repo is intended to go public.
+
+If you re-cut it and want it inline instead, the ceiling is 10 MB: a ~70-second
+720p export at ~900 Kb/s with audio disabled lands around 8 MB.
+
+## Original notes on where the file goes
 
 An animated GIF in the README under **Status**, or an MP4 linked from it. Keep it
 under ~10 MB or GitHub will be slow to render it; 12–15 fps is plenty for UI.
