@@ -21,6 +21,10 @@ See [MVP.md](MVP.md) for scope/phases and [TECH_STACK.md](TECH_STACK.md) for sta
 
 **All phases built and verified.** 209 tests, ruff clean, TypeScript clean, and every layer driven end to end in a browser — sign-in, the constraint builder, live progress, the loop-back, and custom constraints. Deployment is documented but deliberately not executed ([DEPLOYING.md](DEPLOYING.md)): every run costs $0.17–$0.40 and nothing rate-limits it yet.
 
+Read the test count correctly: 54 of those 209 need the Postgres that `docker compose up` provides and skip cleanly without it, so a bare `pytest` on a fresh checkout reports **155 passed, 54 skipped** — not a quarter of the suite broken. Start the compose stack to run all 209.
+
+**Verified on 2026-11-20.** The checks above were run against commit `50dde2a`; everything committed since is documentation only.
+
 **Phases 1–2.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 52 instruments across all 11 GICS sectors plus a fixed-income and commodity sleeve, 2013–2025, see [data/README.md](data/README.md).
 
 Two guarantees are enforced in code rather than requested in a prompt:
@@ -179,7 +183,7 @@ FastAPI ─┬─ Allocation Agent (Claude) — proposes allocation from mandate
         Not built: per-user data isolation, deployment.
 ```
 
-**Phase 6 in progress — traces, licence, deployment guide.** Every LLM call is now recorded: prompt, emitted response, model, tokens, cost, latency, and stop reason, keyed to run and iteration. `GET /api/runs/{id}/traces` returns them in the order they happened, and the results dashboard has an **Agent traces** panel that shows them grouped by iteration.
+**Phase 6 — traces, licence, code-splitting, and the deployment guide.** Every LLM call is now recorded: prompt, emitted response, model, tokens, cost, latency, and stop reason, keyed to run and iteration. `GET /api/runs/{id}/traces` returns them in the order they happened, and the results dashboard has an **Agent traces** panel that shows them grouped by iteration.
 
 The run report already said *what* each agent decided and the stage events said *when*. Neither said **why** — and that gap was widest at the interesting moment. A loop-back is only explicable if you can read the revision feedback the Allocation Agent was handed, which is now recoverable verbatim:
 
@@ -207,7 +211,6 @@ Stated plainly, because the premise of this project is not taking claims on fait
 - **No per-user data isolation.** `runs` has no owner column — every signed-in user sees every run.
 - **Survivorship bias in the universe.** Constituents were chosen knowing which companies still exist in 2026; sector labels are current, not point-in-time; there is no ETF look-through. See [data/README.md](data/README.md).
 - **Not deployed, and a public URL would be an open wallet** — every run costs $0.17–$0.40 and nothing rate-limits it. See [DEPLOYING.md](DEPLOYING.md) for what to add first.
-- **The repo is private.** Flipping it public exposes the entire history, not just `HEAD`.
 
 ## Non-goals (v1)
 
