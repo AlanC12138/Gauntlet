@@ -2,7 +2,7 @@
 name = "gauntlet"
 version = "0.1.0"
 description = "Multi-agent portfolio construction: propose, then verify by execution."
-authors = ["Alan Chen <alanchen0705@gmail.com>"]
+authors = ["Ying Lun Chen <alanchen0705@gmail.com>"]
 readme = "README.md"
 packages = [{ include = "gauntlet", from = "src" }]
 
