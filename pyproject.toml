@@ -24,10 +24,10 @@ alembic = "^1.19"
 psycopg = {version = "^3.3", extras = ["binary"]}
 redis = "^8.1"
 rq = "^2.10"
-clerk-backend-api = "^6.0"
+clerk-backend-api = "^7.1"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.3"
+pytest = "^9.0"
 ruff = "^0.8"
 fakeredis = "^2.37"
 
