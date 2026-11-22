@@ -35,22 +35,34 @@ def test_backtest_math_covers_every_metric():
 def test_backtest_math_includes_real_data():
     """Guards against synthetic-only quietly becoming the normal path.
 
-    Two failure modes look identical from here and must not be treated alike:
-    an *unreachable* store means the database simply isn't running, which is not
-    a defect and skips; a *reachable but empty* store means the cache is cold,
-    which is a real and fixable problem, and fails.
+    Three cases look identical from here and must not be treated alike:
+
+    * **Store unreachable** — the database is not running. Not a defect: skip.
+    * **Store reachable but no price bars** — a fresh checkout or CI, where
+      nobody has run `gauntlet fetch`. Also not a defect: skip. Fetching 170k
+      bars from yfinance to satisfy a guard would make CI slow and flaky, and
+      would test the vendor rather than this code.
+    * **Prices present, yet no real-data case ran** — that is the regression
+      this test exists for, and it fails.
+
+    The distinction is the point: the guard should fire when the data is there
+    and the cases still did not run, not merely when the data is absent.
     """
     import pytest
-    from sqlalchemy import text
+    from sqlalchemy import func, select
     from sqlalchemy.exc import SQLAlchemyError
 
-    from gauntlet.db import get_engine
+    from gauntlet.db import get_session
+    from gauntlet.db.models import PriceBar
 
     try:
-        with get_engine().connect() as conn:
-            conn.execute(text("select 1"))
+        with get_session() as session:
+            bars = session.execute(select(func.count()).select_from(PriceBar)).scalar_one()
     except SQLAlchemyError:
         pytest.skip("price store unreachable; real-data cases cannot run")
+
+    if bars == 0:
+        pytest.skip("price cache is empty; run `gauntlet fetch` to exercise real-data cases")
 
     names = {c.name for c in backtest_math.run().cases}
     assert any(n.startswith("real_") for n in names), (

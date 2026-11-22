@@ -27,6 +27,7 @@ import pandas as pd
 import yfinance as yf
 from sqlalchemy.exc import SQLAlchemyError
 
+from gauntlet.config import settings
 from gauntlet.db import get_session
 from gauntlet.db import prices as repo
 
@@ -39,6 +40,17 @@ CACHE_COLUMNS = ["ticker", "date", "adj_close", "fetched_at"]
 # slack on both ends, every run would look under-covered and re-hit yfinance.
 # Five days covers the longest run of consecutive market closures.
 COVERAGE_SLACK = pd.Timedelta(days=5)
+
+
+class PriceFetchDisabled(RuntimeError):
+    """Data is missing and `GAUNTLET_OFFLINE` forbids fetching it.
+
+    A sibling of `PriceStoreUnavailable` rather than the same class, because the
+    causes differ and the message should say which: one means the database is
+    down, this means the database is fine and the data simply is not there.
+    Both are RuntimeError, so callers that already degrade on a cold cache --
+    the eval harness, the reachability witness -- handle this unchanged.
+    """
 
 
 class PriceStoreUnavailable(RuntimeError):
@@ -91,6 +103,13 @@ def ensure_cached(tickers: list[str], start: dt.date, end: dt.date) -> int:
     ]
     if not missing:
         return 0
+
+    if settings.offline:
+        raise PriceFetchDisabled(
+            f"{len(missing)} ticker(s) are not cached and GAUNTLET_OFFLINE is set: "
+            f"{', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}. "
+            "Run `gauntlet fetch` or `gauntlet import-prices` to populate the cache."
+        )
 
     logger.info("Fetching %d ticker(s) from yfinance: %s", len(missing), ", ".join(missing))
     close = _download(missing, start, end)

@@ -1,0 +1,121 @@
+name: CI
+
+# Pull requests as well as pushes: the point of CI here is that the README's
+# "209 tests, ruff clean, TypeScript clean" is checkable by a reader rather than
+# taken on faith, and a claim only holds if it is re-checked on incoming changes.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — pytest + ruff
+    runs-on: ubuntu-latest
+
+    # Postgres and Redis run as services so the 54 database-backed tests
+    # actually execute. Without them the suite still passes, but reports
+    # "155 passed, 54 skipped" — which proves less than it appears to.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gauntlet
+          POSTGRES_PASSWORD: gauntlet
+          POSTGRES_DB: gauntlet
+        ports:
+          - 5432:5432
+        # The job must not start querying before Postgres accepts connections;
+        # it listens several seconds after the container exists.
+        options: >-
+          --health-cmd "pg_isready -U gauntlet -d gauntlet"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Standard ports here, unlike docker-compose.yml, which uses 5433/6380 to
+      # avoid colliding with whatever is already on a developer's machine. A CI
+      # runner is empty, so there is nothing to collide with.
+      GAUNTLET_DATABASE_URL: postgresql+psycopg://gauntlet:gauntlet@localhost:5432/gauntlet
+      GAUNTLET_REDIS_URL: redis://localhost:6379/0
+      # Never reach for yfinance on a runner. The real-data eval cases skip when
+      # the cache is cold, which is their documented behaviour; downloading
+      # 170k bars per run would test the vendor, not this project.
+      GAUNTLET_OFFLINE: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        # Pinned to the version that generated poetry.lock (lock-version 2.1).
+        # `pipx install poetry` unpinned installs whatever is latest, which is a
+        # quiet way for CI to break months from now on a lock-format change in a
+        # tool this project does not otherwise track. Bump when the lock is
+        # regenerated, not before.
+        run: pipx install poetry==2.1.0
+
+      - name: Install dependencies
+        # --no-interaction so a prompt cannot hang the runner; the lock file is
+        # committed, so this resolves to exactly the versions developed against.
+        run: poetry install --no-interaction
+
+      - name: Lint
+        run: poetry run ruff check src/ tests/
+
+      - name: Test
+        # The suite creates and migrates its own `gauntlet_test` database, so no
+        # alembic step is needed here. Price bars are absent, so the handful of
+        # real-data cases skip by design — see tests/test_evals.py.
+        run: poetry run pytest -q
+
+      - name: Check for schema drift
+        # Catches a model changed without a migration, which passes the tests
+        # (they build the schema from the models) and then breaks a deployment.
+        run: poetry run alembic upgrade head && poetry run alembic check
+
+  frontend:
+    name: Frontend — tsc + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        # `npm ci` rather than `npm install`: it installs exactly the lock file
+        # and fails if the two have drifted, which is the behaviour CI wants.
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build

@@ -1,5 +1,7 @@
 # Gauntlet
 
+[![CI](https://github.com/AlanC12138/Gauntlet/actions/workflows/ci.yml/badge.svg)](https://github.com/AlanC12138/Gauntlet/actions/workflows/ci.yml)
+
 A multi-agent portfolio construction system. You give it a mandate (risk profile, constraints, investable universe), an agent proposes an allocation, and — unlike most "AI portfolio manager" demos — the proposal is never taken on faith: it's backtested against real historical data, checked against deterministic compliance rules, and screened for qualitative exclusions before a synthesis agent signs off or sends it back for revision.
 
 ## Why this exists
@@ -19,11 +21,11 @@ See [MVP.md](MVP.md) for scope/phases and [TECH_STACK.md](TECH_STACK.md) for sta
 
 *A walkthrough: building a mandate with server-locked constraint bounds, the five-agent loop running live, and the full verified report.*
 
-**All phases built and verified.** 209 tests, ruff clean, TypeScript clean, and every layer driven end to end in a browser — sign-in, the constraint builder, live progress, the loop-back, and custom constraints. Deployment is documented but deliberately not executed ([DEPLOYING.md](DEPLOYING.md)): every run costs $0.17–$0.40 and nothing rate-limits it yet.
+**All phases built and verified.** 212 tests, ruff clean, TypeScript clean, and every layer driven end to end in a browser — sign-in, the constraint builder, live progress, the loop-back, and custom constraints. Deployment is documented but deliberately not executed ([DEPLOYING.md](DEPLOYING.md)): every run costs $0.17–$0.40 and nothing rate-limits it yet.
 
-Read the test count correctly: 54 of those 209 need the Postgres that `docker compose up` provides and skip cleanly without it, so a bare `pytest` on a fresh checkout reports **155 passed, 54 skipped** — not a quarter of the suite broken. Start the compose stack to run all 209.
+Read the test count correctly: a quarter of the suite needs the Postgres that `docker compose up` provides and skips cleanly without it, so a bare `pytest` on a fresh checkout reports a large number of skips rather than failures — nothing is broken. Start the compose stack to run all 212. CI runs Postgres and Redis as services and so executes **206 of the 212**; the six it skips are the eval cases needing a warm price cache, because downloading 170k bars from yfinance on every run would test the vendor rather than this code.
 
-**Verified on 2026-11-20.** The checks above were run against commit `50dde2a`; everything committed since is documentation only.
+**Verified on 2026-11-22**, against the commit that added CI. 212 passed locally with the compose stack up; 206 passed / 6 skipped under CI's conditions (empty price cache, `GAUNTLET_OFFLINE`), which is what the badge above reports.
 
 **Phases 1–2.** The full propose/verify/govern loop runs: the Allocation Agent proposes weights; the Verification Agent backtests them, the Constraint-Compliance Agent checks them deterministically, and the Screening Agent screens them against a RAG corpus; the Synthesis Agent then approves with a memo or sends the proposal back with revision feedback, bounded to three iterations. The demo universe is pinned and verified — 52 instruments across all 11 GICS sectors plus a fixed-income and commodity sleeve, 2013–2025, see [data/README.md](data/README.md).
 

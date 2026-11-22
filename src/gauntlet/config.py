@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     universe_path: Path = DATA_DIR / "universe.json"
     price_cache_path: Path = DATA_DIR / "cache" / "prices.parquet"
 
+    # Refuse to fetch from yfinance, failing instead with a clear error.
+    # CI sets this: a test suite that downloads 170k bars from a vendor on every
+    # run is slow, and it tests that vendor's availability rather than this code.
+    # The real-data cases skip cleanly when the cache is cold, which is the
+    # documented behaviour anyway.
+    offline: bool = False
+
     # Ports are non-default (5433/6380, see docker-compose.yml) so the dev stack
     # cannot collide with a Postgres or Redis already running on the machine.
     # Overridable as GAUNTLET_DATABASE_URL / GAUNTLET_REDIS_URL.

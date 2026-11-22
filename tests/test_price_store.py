@@ -142,3 +142,46 @@ def test_missing_ticker_raises_rather_than_returning_a_short_panel(clean_db, mon
 
     with pytest.raises(RuntimeError, match="AGG"):
         prices.price_panel(["SPY", "AGG"], dt.date(2020, 1, 1), dt.date(2020, 1, 3))
+
+
+def test_offline_mode_refuses_to_fetch(clean_db, monkeypatch):
+    """CI relies on this: an empty cache must fail fast rather than pulling
+    170k bars from a third party on every run."""
+    import datetime as dt
+
+    from gauntlet.config import settings
+    from gauntlet.data import prices
+    from gauntlet.data.prices import PriceFetchDisabled
+
+    monkeypatch.setattr(settings, "offline", True)
+    monkeypatch.setattr(
+        prices, "_download", lambda *a, **k: pytest.fail("yfinance was called in offline mode")
+    )
+
+    with pytest.raises(PriceFetchDisabled, match="GAUNTLET_OFFLINE"):
+        prices.ensure_cached(["SPY"], dt.date(2020, 1, 1), dt.date(2020, 1, 3))
+
+
+def test_offline_mode_still_serves_cached_data(clean_db, monkeypatch):
+    """Offline forbids *fetching*, not reading — otherwise it would be useless."""
+    import datetime as dt
+
+    from gauntlet.config import settings
+    from gauntlet.data import prices
+
+    monkeypatch.setattr(settings, "offline", True)
+    with get_session() as session:
+        repo.insert_bars(
+            session, _bars([("SPY", "2020-01-02", 100.0), ("SPY", "2020-01-03", 101.0)])
+        )
+
+    panel = prices.price_panel(["SPY"], dt.date(2020, 1, 1), dt.date(2020, 1, 3))
+    assert len(panel) == 2
+
+
+def test_offline_errors_are_catchable_as_store_unavailable():
+    """The eval harness and the reachability witness already degrade on
+    RuntimeError; offline must not need them changed."""
+    from gauntlet.data.prices import PriceFetchDisabled
+
+    assert issubclass(PriceFetchDisabled, RuntimeError)
