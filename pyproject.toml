@@ -9,7 +9,7 @@ packages = [{ include = "gauntlet", from = "src" }]
 [tool.poetry.dependencies]
 # Versions below are the ones this was actually built and tested against.
 python = "^3.13"
-anthropic = "^0.120"
+anthropic = "^2.11"
 pandas = "^3.0"
 numpy = "^2.5"
 yfinance = "^1.5"
